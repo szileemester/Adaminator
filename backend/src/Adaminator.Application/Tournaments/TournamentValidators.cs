@@ -1,0 +1,45 @@
+using Adaminator.Domain.Entities;
+using Adaminator.Domain.Enums;
+using FluentValidation;
+
+namespace Adaminator.Application.Tournaments;
+
+public class CreateTournamentRequestValidator : AbstractValidator<CreateTournamentRequest>
+{
+    public CreateTournamentRequestValidator()
+    {
+        RuleFor(x => x.Name)
+            .NotEmpty().WithMessage("Tournament name is required.")
+            .MaximumLength(Tournament.NameMaxLength);
+
+        RuleFor(x => x.Notes)
+            .MaximumLength(Tournament.NotesMaxLength);
+
+        RuleFor(x => x.Type).IsInEnum();
+        RuleFor(x => x.DefaultMatchFormat).IsInEnum();
+
+        RuleFor(x => x.ThirdPlaceEnabled)
+            .Must((request, thirdPlace) => !(request.Type == TournamentType.DoubleElimination && thirdPlace))
+            .WithMessage("Third place match is available only for Single Elimination tournaments.");
+    }
+}
+
+public class UpdateTournamentRequestValidator : AbstractValidator<UpdateTournamentRequest>
+{
+    public UpdateTournamentRequestValidator()
+    {
+        RuleFor(x => x.Name)
+            .NotEmpty().WithMessage("Tournament name is required.")
+            .MaximumLength(Tournament.NameMaxLength);
+
+        RuleFor(x => x.Notes)
+            .MaximumLength(Tournament.NotesMaxLength);
+
+        RuleFor(x => x.Type).IsInEnum();
+        RuleFor(x => x.DefaultMatchFormat).IsInEnum();
+
+        RuleFor(x => x.ThirdPlaceEnabled)
+            .Must((request, thirdPlace) => !(request.Type == TournamentType.DoubleElimination && thirdPlace))
+            .WithMessage("Third place match is available only for Single Elimination tournaments.");
+    }
+}

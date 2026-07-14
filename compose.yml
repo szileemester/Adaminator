@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: adaminator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adaminator}
+      POSTGRES_DB: adaminator
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adaminator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Postgres: "Host=db;Port=5432;Database=adaminator;Username=adaminator;Password=${POSTGRES_PASSWORD:-adaminator}"
+      Admin__Password: ${ADMIN_PASSWORD:-adaminator-dev}
+      Jwt__Key: ${JWT_KEY:-dev-only-change-me-adaminator-signing-key-1234567890}
+      Cors__AllowedOrigins__0: "http://localhost:5173"
+    ports:
+      - "5091:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: "http://localhost:5091"
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+volumes:
+  db-data:

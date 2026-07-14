@@ -1,0 +1,34 @@
+# .NET
+bin/
+obj/
+*.user
+[Bb]in/
+[Oo]bj/
+.vs/
+*.suo
+
+# Rider
+.idea/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local (per-developer) Claude Code settings
+.claude/settings.local.json
