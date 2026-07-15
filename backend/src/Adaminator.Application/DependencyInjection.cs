@@ -12,6 +12,7 @@ public static class DependencyInjection
         services.AddScoped<TournamentService>();
         services.AddScoped<ParticipantService>();
         services.AddScoped<BracketService>();
+        services.AddScoped<MatchService>();
         return services;
     }
 }

@@ -36,6 +36,21 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
         builder.Property(m => m.ParticipantBId);
         builder.Property(m => m.WinnerId);
 
+        builder.Property(m => m.ScoreType)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+
+        builder.Property(m => m.CompletedAt);
+        builder.Property(m => m.CompletionSequence);
+
         builder.HasIndex(m => m.TournamentId);
+
+        builder.HasMany(m => m.ScoreEntries)
+            .WithOne()
+            .HasForeignKey(e => e.MatchId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Metadata.FindNavigation(nameof(Match.ScoreEntries))!
+            .SetPropertyAccessMode(PropertyAccessMode.Field);
     }
 }

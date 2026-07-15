@@ -39,6 +39,15 @@ export interface BracketSlot {
   name: string;
 }
 
+export type ScoreType = 'WinnerOnly' | 'Games' | 'Points' | 'Sets';
+
+export interface ScoreEntry {
+  sequenceNumber: number;
+  scoreA: number | null;
+  scoreB: number | null;
+  participantAWon: boolean;
+}
+
 export interface BracketMatch {
   id: string;
   segment: BracketSegment;
@@ -49,6 +58,12 @@ export interface BracketMatch {
   status: MatchStatus;
   winnerId: string | null;
   matchFormat: MatchFormat;
+  scoreType: ScoreType | null;
+  entries: ScoreEntry[];
+  aggregateScoreA: number;
+  aggregateScoreB: number;
+  completedAt: string | null;
+  canUndo: boolean;
 }
 
 export interface BracketRound {
@@ -113,3 +128,20 @@ export const tournamentStatusLabels: Record<TournamentStatus, string> = {
   Running: 'Running',
   Finished: 'Finished',
 };
+
+export const scoreTypeLabels: Record<ScoreType, string> = {
+  WinnerOnly: 'Winner Only',
+  Games: 'Games',
+  Points: 'Points',
+  Sets: 'Sets',
+};
+
+/** Number of game/set wins one participant needs to win a match of the given format. */
+export function requiredWins(format: MatchFormat): number {
+  return Math.ceil(matchFormatGameCount(format) / 2);
+}
+
+/** The most games/sets a match of the given format can ever be decided in. */
+export function matchFormatGameCount(format: MatchFormat): number {
+  return { Bo1: 1, Bo3: 3, Bo5: 5, Bo7: 7 }[format];
+}

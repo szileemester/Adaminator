@@ -20,13 +20,19 @@ internal static class BracketProjection
 
         var totalRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
 
+        var latestCompletionSequence = tournament.Matches
+            .Where(m => m.CompletionSequence.HasValue)
+            .Select(m => m.CompletionSequence!.Value)
+            .DefaultIfEmpty(long.MinValue)
+            .Max();
+
         var rounds = winnerMatches
             .GroupBy(m => m.Round)
             .OrderBy(g => g.Key)
             .Select(g => new BracketRoundDto(
                 g.Key,
                 RoundTitle(g.Key, totalRounds),
-                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, names)).ToList()))
+                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, names, latestCompletionSequence)).ToList()))
             .ToList();
 
         var thirdPlace = tournament.Matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
@@ -35,19 +41,36 @@ internal static class BracketProjection
             tournament.Type,
             tournament.Status,
             rounds,
-            thirdPlace is null ? null : ToMatchDto(thirdPlace, names));
+            thirdPlace is null ? null : ToMatchDto(thirdPlace, names, latestCompletionSequence));
     }
 
-    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, string> names) => new(
-        match.Id,
-        match.Segment,
-        match.Round,
-        match.IndexInRound,
-        ToSlot(match.ParticipantAId, names),
-        ToSlot(match.ParticipantBId, names),
-        match.Status,
-        match.WinnerId,
-        match.MatchFormat);
+    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, string> names, long latestCompletionSequence)
+    {
+        var entries = match.ScoreEntries
+            .OrderBy(e => e.SequenceNumber)
+            .Select(e => new ScoreEntryDto(e.SequenceNumber, e.ScoreA, e.ScoreB, e.ParticipantAWon))
+            .ToList();
+
+        var aggregateA = entries.Count(e => e.ParticipantAWon);
+        var aggregateB = entries.Count - aggregateA;
+
+        return new BracketMatchDto(
+            match.Id,
+            match.Segment,
+            match.Round,
+            match.IndexInRound,
+            ToSlot(match.ParticipantAId, names),
+            ToSlot(match.ParticipantBId, names),
+            match.Status,
+            match.WinnerId,
+            match.MatchFormat,
+            match.ScoreType,
+            entries,
+            aggregateA,
+            aggregateB,
+            match.CompletedAt,
+            CanUndo: match.CompletionSequence == latestCompletionSequence);
+    }
 
     private static BracketSlotDto? ToSlot(Guid? participantId, IReadOnlyDictionary<Guid, string> names) =>
         participantId is null ? null : new BracketSlotDto(participantId.Value, names.GetValueOrDefault(participantId.Value, "?"));

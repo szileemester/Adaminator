@@ -183,6 +183,149 @@ public class Tournament
         Status = TournamentStatus.Running;
     }
 
+    // ---- Match results (Single Elimination; Double Elimination is a future milestone) ----
+
+    /// <summary>Saves a (possibly partial) detailed score. Never decides the match (FR-MATCH-006/007).</summary>
+    public void SaveMatchResult(Guid matchId, MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries) =>
+        FindMatch(matchId).SaveResult(matchFormat, scoreType, entries);
+
+    /// <summary>Saves the deciding detailed score, sets the winner and advances it (BR-018 through BR-021).</summary>
+    public void CompleteMatch(
+        Guid matchId,
+        MatchFormat matchFormat,
+        ScoreType scoreType,
+        IReadOnlyList<ScoreEntryInput> entries,
+        DateTimeOffset completedAt)
+    {
+        var match = FindMatch(matchId);
+        match.Complete(matchFormat, scoreType, entries, NextCompletionSequence(), completedAt);
+        Advance(match);
+        MaybeFinish();
+    }
+
+    /// <summary>Completes a match by forfeit; the selected winner advances normally (BR-020, FR-FORFEIT-001..004).</summary>
+    public void ForfeitMatch(Guid matchId, Guid winnerId, DateTimeOffset completedAt)
+    {
+        var match = FindMatch(matchId);
+        match.CompleteAsForfeit(winnerId, NextCompletionSequence(), completedAt);
+        Advance(match);
+        MaybeFinish();
+    }
+
+    /// <summary>
+    /// Reverts the chronologically latest completed/forfeited match, provided nothing it fed into
+    /// has started yet (BR-022, FR-UNDO-001..004).
+    /// </summary>
+    public void UndoMatch(Guid matchId)
+    {
+        var match = FindMatch(matchId);
+        if (match.Status is not (MatchStatus.Completed or MatchStatus.Forfeit))
+        {
+            throw new DomainException("Only a completed or forfeited match can be undone.");
+        }
+
+        var latestSequence = _matches.Where(m => m.CompletionSequence.HasValue).Max(m => m.CompletionSequence);
+        if (match.CompletionSequence != latestSequence)
+        {
+            throw new DomainException("Only the most recently completed match can be undone.");
+        }
+
+        var rounds = TotalRounds();
+
+        Match? nextWinnerMatch = null;
+        bool nextWinnerSlotA = false;
+        if (match.Segment == BracketSegment.Winner)
+        {
+            var next = SingleEliminationBracket.NextWinnerSlot(match.Round, match.IndexInRound, rounds);
+            if (next is not null)
+            {
+                nextWinnerMatch = FindWinnerMatch(next.Value.Round, next.Value.IndexInRound);
+                nextWinnerSlotA = next.Value.SlotA;
+            }
+        }
+
+        Match? thirdPlaceMatch = null;
+        if (ThirdPlaceEnabled && match.Segment == BracketSegment.Winner && match.Round == rounds - 1)
+        {
+            thirdPlaceMatch = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+        }
+
+        if (nextWinnerMatch is { Status: not MatchStatus.Pending } || thirdPlaceMatch is { Status: not MatchStatus.Pending })
+        {
+            throw new DomainException("This match cannot be undone because a dependent match has already started.");
+        }
+
+        var winnerId = match.WinnerId!.Value;
+        var loserId = winnerId == match.ParticipantAId ? match.ParticipantBId!.Value : match.ParticipantAId!.Value;
+
+        nextWinnerMatch?.ClearSlot(nextWinnerSlotA, winnerId);
+        thirdPlaceMatch?.ClearSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+
+        if (Status == TournamentStatus.Finished)
+        {
+            Status = TournamentStatus.Running;
+        }
+
+        match.Undo();
+    }
+
+    private void Advance(Match match)
+    {
+        if (match.Segment != BracketSegment.Winner)
+        {
+            return;
+        }
+
+        var winnerId = match.WinnerId!.Value;
+        var loserId = winnerId == match.ParticipantAId ? match.ParticipantBId!.Value : match.ParticipantAId!.Value;
+        var rounds = TotalRounds();
+
+        var next = SingleEliminationBracket.NextWinnerSlot(match.Round, match.IndexInRound, rounds);
+        if (next is not null)
+        {
+            FindWinnerMatch(next.Value.Round, next.Value.IndexInRound).ResolveSlot(next.Value.SlotA, winnerId);
+        }
+
+        if (ThirdPlaceEnabled && match.Round == rounds - 1)
+        {
+            var thirdPlace = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+            thirdPlace?.ResolveSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+        }
+    }
+
+    /// <summary>The tournament is Finished once the Final (and, if enabled, Third Place) is decided.</summary>
+    private void MaybeFinish()
+    {
+        var rounds = TotalRounds();
+        var final = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Winner && m.Round == rounds && m.IndexInRound == 0);
+        if (final is null || !IsDecided(final))
+        {
+            return;
+        }
+
+        var thirdPlace = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+        if (thirdPlace is not null && !IsDecided(thirdPlace))
+        {
+            return;
+        }
+
+        Status = TournamentStatus.Finished;
+    }
+
+    private int TotalRounds() => SingleEliminationBracket.RoundCount(SingleEliminationBracket.ComputeBracketSize(_participants.Count));
+
+    private static bool IsDecided(Match match) => match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
+
+    private long NextCompletionSequence() =>
+        _matches.Where(m => m.CompletionSequence.HasValue).Select(m => m.CompletionSequence!.Value).DefaultIfEmpty(0L).Max() + 1;
+
+    private Match FindWinnerMatch(int round, int indexInRound) =>
+        _matches.Single(m => m.Segment == BracketSegment.Winner && m.Round == round && m.IndexInRound == indexInRound);
+
+    private Match FindMatch(Guid matchId) =>
+        _matches.FirstOrDefault(m => m.Id == matchId)
+        ?? throw new DomainException("Match not found in this tournament.");
+
     private void SetDetails(
         string name,
         DateOnly date,

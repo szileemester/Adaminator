@@ -149,7 +149,7 @@ export function TournamentDetailPage() {
               Bracket
             </Typography>
             {bracket ? (
-              <BracketView bracket={bracket} />
+              <BracketView bracket={bracket} tournamentId={tournament.id} />
             ) : (
               <CircularProgress size={24} />
             )}

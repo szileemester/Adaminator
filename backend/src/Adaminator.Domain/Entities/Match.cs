@@ -1,14 +1,18 @@
 using Adaminator.Domain.Enums;
+using Adaminator.Domain.Exceptions;
 
 namespace Adaminator.Domain.Entities;
 
 /// <summary>
 /// The primary competitive unit and the source of truth for bracket progression.
 /// A slot (<see cref="ParticipantAId"/>/<see cref="ParticipantBId"/>) is null while it is still
-/// unresolved (to be filled by an upstream match winner). Result entry arrives in a later milestone.
+/// unresolved (to be filled by an upstream match winner). Result mutation is exposed only as
+/// <c>internal</c> members, invoked exclusively through the owning <see cref="Tournament"/>.
 /// </summary>
 public class Match
 {
+    private readonly List<ScoreEntry> _scoreEntries = new();
+
     private Match()
     {
     }
@@ -30,6 +34,14 @@ public class Match
     public MatchStatus Status { get; private set; }
     public Guid? WinnerId { get; private set; }
 
+    public ScoreType? ScoreType { get; private set; }
+    public DateTimeOffset? CompletedAt { get; private set; }
+
+    /// <summary>Monotonic, tournament-scoped ordinal assigned when this match is decided; used to find the latest completed match for Undo (FR-UNDO-001).</summary>
+    public long? CompletionSequence { get; private set; }
+
+    public IReadOnlyCollection<ScoreEntry> ScoreEntries => _scoreEntries.AsReadOnly();
+
     internal static Match Create(
         Guid tournamentId,
         BracketSegment segment,
@@ -50,4 +62,189 @@ public class Match
         Status = MatchStatus.Pending,
         WinnerId = null
     };
+
+    // ---- Result entry (BR-013 through BR-020; called only via Tournament) ----
+
+    /// <summary>Persists a (possibly partial) detailed score. Always leaves the match undecided (FR-MATCH-006/007, AC-SCORE-002).</summary>
+    internal void SaveResult(MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries)
+    {
+        EnsureNotDecided();
+        var built = BuildEntries(matchFormat, scoreType, entries);
+
+        MatchFormat = matchFormat;
+        ScoreType = scoreType;
+        _scoreEntries.Clear();
+        _scoreEntries.AddRange(built);
+        WinnerId = null;
+        Status = built.Count > 0 ? MatchStatus.InProgress : MatchStatus.Pending;
+    }
+
+    /// <summary>Persists the final detailed score and decides the match. Rejects a non-decisive score (AC-SCORE-003).</summary>
+    internal void Complete(
+        MatchFormat matchFormat,
+        ScoreType scoreType,
+        IReadOnlyList<ScoreEntryInput> entries,
+        long completionSequence,
+        DateTimeOffset completedAt)
+    {
+        EnsureNotDecided();
+        var built = BuildEntries(matchFormat, scoreType, entries);
+
+        var required = matchFormat.RequiredWins();
+        var winsA = built.Count(e => e.ParticipantAWon);
+        var winsB = built.Count - winsA;
+
+        Guid winnerId;
+        if (winsA >= required)
+        {
+            winnerId = ParticipantAId!.Value;
+        }
+        else if (winsB >= required)
+        {
+            winnerId = ParticipantBId!.Value;
+        }
+        else
+        {
+            throw new DomainException("Neither participant has reached the required number of wins yet.");
+        }
+
+        MatchFormat = matchFormat;
+        ScoreType = scoreType;
+        _scoreEntries.Clear();
+        _scoreEntries.AddRange(built);
+        WinnerId = winnerId;
+        Status = MatchStatus.Completed;
+        CompletedAt = completedAt;
+        CompletionSequence = completionSequence;
+    }
+
+    /// <summary>Completes the match by forfeit. Detailed scores are not required and any previously saved partial score is left untouched (BR-020, FR-FORFEIT-001..004).</summary>
+    internal void CompleteAsForfeit(Guid winnerId, long completionSequence, DateTimeOffset completedAt)
+    {
+        EnsureNotDecided();
+        if (winnerId != ParticipantAId && winnerId != ParticipantBId)
+        {
+            throw new DomainException("The forfeit winner must be one of the two participants.");
+        }
+
+        WinnerId = winnerId;
+        Status = MatchStatus.Forfeit;
+        CompletedAt = completedAt;
+        CompletionSequence = completionSequence;
+    }
+
+    /// <summary>Fills an empty downstream slot with an advancing participant (BR-021).</summary>
+    internal void ResolveSlot(bool slotA, Guid participantId)
+    {
+        if (slotA)
+        {
+            if (ParticipantAId is not null)
+            {
+                throw new DomainException("Participant A slot is already filled.");
+            }
+
+            ParticipantAId = participantId;
+        }
+        else
+        {
+            if (ParticipantBId is not null)
+            {
+                throw new DomainException("Participant B slot is already filled.");
+            }
+
+            ParticipantBId = participantId;
+        }
+    }
+
+    /// <summary>Reverts a slot filled by advancement, used by Undo (FR-UNDO-003).</summary>
+    internal void ClearSlot(bool slotA, Guid expectedParticipantId)
+    {
+        if (slotA)
+        {
+            if (ParticipantAId != expectedParticipantId)
+            {
+                throw new DomainException("Participant A slot does not hold the expected participant.");
+            }
+
+            ParticipantAId = null;
+        }
+        else
+        {
+            if (ParticipantBId != expectedParticipantId)
+            {
+                throw new DomainException("Participant B slot does not hold the expected participant.");
+            }
+
+            ParticipantBId = null;
+        }
+    }
+
+    /// <summary>Reverts a Completed/Forfeit match back to its pre-decision state. Detailed scores are preserved (FR-UNDO-004/005).</summary>
+    internal void Undo()
+    {
+        if (Status is not (MatchStatus.Completed or MatchStatus.Forfeit))
+        {
+            throw new DomainException("Only a completed or forfeited match can be undone.");
+        }
+
+        WinnerId = null;
+        CompletedAt = null;
+        CompletionSequence = null;
+        Status = _scoreEntries.Count > 0 ? MatchStatus.InProgress : MatchStatus.Pending;
+    }
+
+    private void EnsureNotDecided()
+    {
+        if (Status is MatchStatus.Completed or MatchStatus.Forfeit)
+        {
+            throw new DomainException("This match has already been decided and can no longer be edited.");
+        }
+
+        if (ParticipantAId is null || ParticipantBId is null)
+        {
+            throw new DomainException("A match needs both participants before results can be recorded.");
+        }
+    }
+
+    private List<ScoreEntry> BuildEntries(MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries)
+    {
+        var maxGames = matchFormat.MaxGames();
+        if (entries.Count > maxGames)
+        {
+            throw new DomainException($"A {matchFormat} match cannot have more than {maxGames} game(s)/set(s).");
+        }
+
+        if (scoreType == Adaminator.Domain.Enums.ScoreType.WinnerOnly && matchFormat != Adaminator.Domain.Enums.MatchFormat.Bo1)
+        {
+            throw new DomainException("Winner Only scoring is valid only for BO1 matches.");
+        }
+
+        var built = new List<ScoreEntry>(entries.Count);
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+
+            if (scoreType == Adaminator.Domain.Enums.ScoreType.Points && (entry.ScoreA is null || entry.ScoreB is null))
+            {
+                throw new DomainException("Points scoring requires a numeric score for both participants in every entry.");
+            }
+
+            if (entry.ScoreA is not null && entry.ScoreB is not null)
+            {
+                if (entry.ScoreA == entry.ScoreB)
+                {
+                    throw new DomainException("A game or set may not end in a draw.");
+                }
+
+                if (entry.ParticipantAWon != entry.ScoreA > entry.ScoreB)
+                {
+                    throw new DomainException("The declared winner does not match the entered scores.");
+                }
+            }
+
+            built.Add(ScoreEntry.Create(Id, i + 1, entry.ScoreA, entry.ScoreB, entry.ParticipantAWon));
+        }
+
+        return built;
+    }
 }

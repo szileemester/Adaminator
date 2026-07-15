@@ -16,14 +16,14 @@ public class TournamentRepository : ITournamentRepository
     public Task<Tournament?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         _dbContext.Tournaments
             .Include(t => t.Participants)
-            .Include(t => t.Matches)
+            .Include(t => t.Matches).ThenInclude(m => m.ScoreEntries)
             .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
 
     public Task<Tournament?> GetByPublicTokenAsync(string publicToken, CancellationToken cancellationToken = default) =>
         _dbContext.Tournaments
             .AsNoTracking()
             .Include(t => t.Participants)
-            .Include(t => t.Matches)
+            .Include(t => t.Matches).ThenInclude(m => m.ScoreEntries)
             .FirstOrDefaultAsync(t => t.PublicToken == publicToken, cancellationToken);
 
     public async Task<IReadOnlyList<Tournament>> GetAllAsync(CancellationToken cancellationToken = default) =>

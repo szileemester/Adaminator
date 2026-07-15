@@ -1,7 +1,12 @@
+import { useState } from 'react';
 import { Box, Chip, Paper, Stack, Typography } from '@mui/material';
 import type { Bracket, BracketMatch, BracketSlot } from '../api/types';
+import { MatchResultDialog } from './MatchResultDialog';
 
-export function BracketView({ bracket }: { bracket: Bracket }) {
+export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tournamentId?: string }) {
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const selectedMatch = tournamentId && selectedMatchId ? findMatch(bracket, selectedMatchId) : null;
+
   if (bracket.rounds.length === 0) {
     return (
       <Typography color="text.secondary">
@@ -19,7 +24,7 @@ export function BracketView({ bracket }: { bracket: Bracket }) {
               {round.title}
             </Typography>
             {round.matches.map((match) => (
-              <MatchCard key={match.id} match={match} />
+              <MatchCard key={match.id} match={match} onSelect={tournamentId ? setSelectedMatchId : undefined} />
             ))}
           </Stack>
         ))}
@@ -29,17 +34,41 @@ export function BracketView({ bracket }: { bracket: Bracket }) {
             <Typography variant="subtitle2" color="text.secondary" sx={{ textAlign: 'center' }}>
               Third Place
             </Typography>
-            <MatchCard match={bracket.thirdPlace} />
+            <MatchCard match={bracket.thirdPlace} onSelect={tournamentId ? setSelectedMatchId : undefined} />
           </Stack>
         )}
       </Stack>
+
+      {selectedMatch && tournamentId && (
+        <MatchResultDialog
+          key={selectedMatch.id}
+          tournamentId={tournamentId}
+          match={selectedMatch}
+          onClose={() => setSelectedMatchId(null)}
+        />
+      )}
     </Box>
   );
 }
 
-function MatchCard({ match }: { match: BracketMatch }) {
+function findMatch(bracket: Bracket, matchId: string): BracketMatch | null {
+  for (const round of bracket.rounds) {
+    const found = round.matches.find((m) => m.id === matchId);
+    if (found) {
+      return found;
+    }
+  }
+  return bracket.thirdPlace?.id === matchId ? bracket.thirdPlace : null;
+}
+
+function MatchCard({ match, onSelect }: { match: BracketMatch; onSelect?: (matchId: string) => void }) {
+  const actionable = Boolean(onSelect) && match.participantA != null && match.participantB != null;
   return (
-    <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+    <Paper
+      variant="outlined"
+      sx={{ overflow: 'hidden', cursor: actionable ? 'pointer' : 'default' }}
+      onClick={actionable ? () => onSelect!(match.id) : undefined}
+    >
       <SlotRow slot={match.participantA} winnerId={match.winnerId} />
       <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
       <SlotRow slot={match.participantB} winnerId={match.winnerId} />

@@ -136,6 +136,24 @@ public static class SingleEliminationBracket
         return matches;
     }
 
+    /// <summary>The Winner-segment match/slot that a match at (round, indexInRound) feeds its winner into. Null once the match is the Final.</summary>
+    public static (int Round, int IndexInRound, bool SlotA)? NextWinnerSlot(int round, int indexInRound, int totalRounds)
+    {
+        if (round >= totalRounds)
+        {
+            return null;
+        }
+
+        return (round + 1, indexInRound / 2, indexInRound % 2 == 0);
+    }
+
+    /// <summary>
+    /// Whether the Third Place slot fed by a given semifinal's loser is slot A. Semifinal 0's loser
+    /// takes slot A and semifinal 1's loser takes slot B, mirroring how their winners feed the
+    /// Final's slots A/B via <see cref="NextWinnerSlot"/>.
+    /// </summary>
+    public static bool ThirdPlaceSlotAFromSemifinalIndex(int semifinalIndex) => semifinalIndex == 0;
+
     private static bool HasTwoSemifinals(int rounds, List<Match> matches)
     {
         if (rounds < 2)

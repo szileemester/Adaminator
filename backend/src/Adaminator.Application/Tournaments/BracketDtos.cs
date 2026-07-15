@@ -13,7 +13,13 @@ public record BracketMatchDto(
     BracketSlotDto? ParticipantB,
     MatchStatus Status,
     Guid? WinnerId,
-    MatchFormat MatchFormat);
+    MatchFormat MatchFormat,
+    ScoreType? ScoreType,
+    IReadOnlyList<ScoreEntryDto> Entries,
+    int AggregateScoreA,
+    int AggregateScoreB,
+    DateTimeOffset? CompletedAt,
+    bool CanUndo);
 
 public record BracketRoundDto(int Round, string Title, IReadOnlyList<BracketMatchDto> Matches);
 
