@@ -26,5 +26,8 @@ public record BracketRoundDto(int Round, string Title, IReadOnlyList<BracketMatc
 public record BracketDto(
     TournamentType Type,
     TournamentStatus Status,
-    IReadOnlyList<BracketRoundDto> Rounds,
-    BracketMatchDto? ThirdPlace);
+    IReadOnlyList<BracketRoundDto> WinnerRounds,
+    IReadOnlyList<BracketRoundDto> LoserRounds,
+    BracketMatchDto? GrandFinal,
+    BracketMatchDto? ThirdPlace,
+    BracketSlotDto? ThirdPlacePodium);

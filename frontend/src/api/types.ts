@@ -75,8 +75,15 @@ export interface BracketRound {
 export interface Bracket {
   type: TournamentType;
   status: TournamentStatus;
-  rounds: BracketRound[];
+  winnerRounds: BracketRound[];
+  /** Double Elimination only; empty for Single Elimination. */
+  loserRounds: BracketRound[];
+  /** Double Elimination only; null for Single Elimination. */
+  grandFinal: BracketMatch | null;
+  /** Single Elimination only: a real match. Null for Double Elimination (see thirdPlacePodium). */
   thirdPlace: BracketMatch | null;
+  /** Double Elimination only: derived from the Loser Bracket Final's result - there is no separate match. */
+  thirdPlacePodium: BracketSlot | null;
 }
 
 export interface PublicTournament {
@@ -90,16 +97,20 @@ export interface PublicTournament {
   bracket: Bracket | null;
 }
 
-/** Smallest power of two >= n (the bracket size). */
-export function bracketSize(participantCount: number): number {
+/**
+ * Smallest power of two >= n (the bracket size). Double Elimination has no 2-slot topology, so it
+ * floors at 4 (mirrors DoubleEliminationBracket.ComputeBracketSize on the backend).
+ */
+export function bracketSize(participantCount: number, type: TournamentType = 'SingleElimination'): number {
+  if (participantCount < 2) return 0;
   let size = 1;
   while (size < participantCount) size <<= 1;
-  return participantCount < 2 ? 0 : size;
+  return type === 'DoubleElimination' ? Math.max(4, size) : size;
 }
 
 /** Number of first-round byes required for the given participant count. */
-export function requiredByes(participantCount: number): number {
-  return participantCount < 2 ? 0 : bracketSize(participantCount) - participantCount;
+export function requiredByes(participantCount: number, type: TournamentType = 'SingleElimination'): number {
+  return participantCount < 2 ? 0 : bracketSize(participantCount, type) - participantCount;
 }
 
 export interface TournamentInput {

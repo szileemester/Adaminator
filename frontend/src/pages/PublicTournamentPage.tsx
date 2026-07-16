@@ -70,7 +70,7 @@ export function PublicTournamentPage() {
           </Card>
         )}
 
-        {data?.bracket && data.bracket.rounds.length > 0 && (
+        {data?.bracket && data.bracket.winnerRounds.length > 0 && (
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>

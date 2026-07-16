@@ -45,6 +45,20 @@ public class Match
     /// <summary>Monotonic, tournament-scoped ordinal assigned when this match is decided; used to find the latest completed match for Undo (FR-UNDO-001).</summary>
     public long? CompletionSequence { get; private set; }
 
+    /// <summary>
+    /// Double Elimination only: where this match's winner/loser is routed once decided, resolved
+    /// once (after bye-cascade collapse) when the tournament starts and immutable thereafter. Null
+    /// for Single Elimination, which computes its single forward route on the fly instead
+    /// (<see cref="Brackets.SingleEliminationBracket.NextWinnerSlot"/>) and for the Grand Final's
+    /// winner route (there is nowhere further to go).
+    /// </summary>
+    public Guid? WinnerToMatchId { get; private set; }
+    public bool? WinnerToSlotA { get; private set; }
+
+    /// <summary>Double Elimination only: where this match's loser is routed. Null for a Loser Bracket match or the Grand Final (the loser is not routed anywhere further) and for Single Elimination.</summary>
+    public Guid? LoserToMatchId { get; private set; }
+    public bool? LoserToSlotA { get; private set; }
+
     public IReadOnlyCollection<ScoreEntry> ScoreEntries => _scoreEntries.AsReadOnly();
 
     internal static Match Create(
@@ -138,6 +152,19 @@ public class Match
         Status = MatchStatus.Forfeit;
         CompletedAt = completedAt;
         CompletionSequence = completionSequence;
+    }
+
+    /// <summary>
+    /// Double Elimination only: records the resolved (post bye-cascade) forward routes for this
+    /// match. Called exactly once per match, by <see cref="Brackets.DoubleEliminationBracket"/>
+    /// while building the graph at tournament start; never recomputed afterward.
+    /// </summary>
+    internal void SetRoutes(Guid? winnerToMatchId, bool? winnerToSlotA, Guid? loserToMatchId, bool? loserToSlotA)
+    {
+        WinnerToMatchId = winnerToMatchId;
+        WinnerToSlotA = winnerToSlotA;
+        LoserToMatchId = loserToMatchId;
+        LoserToSlotA = loserToSlotA;
     }
 
     /// <summary>Fills an empty downstream slot with an advancing participant (BR-021).</summary>

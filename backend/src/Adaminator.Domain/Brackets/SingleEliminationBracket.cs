@@ -56,28 +56,8 @@ public static class SingleEliminationBracket
         var count = ordered.Count;
         var size = ComputeBracketSize(count);
         var requiredByes = ComputeRequiredByes(count);
-
-        var byes = ordered.Where(p => p.HasBye).ToList();
-        if (byes.Count != requiredByes)
-        {
-            throw new DomainException($"Exactly {requiredByes} bye(s) must be selected; {byes.Count} chosen.");
-        }
-
-        var players = ordered.Where(p => !p.HasBye).ToList();
         var pairingCount = size / 2;
-        var pairings = new (Guid? A, Guid? B)[pairingCount];
-
-        for (var k = 0; k < requiredByes; k++)
-        {
-            pairings[k] = (byes[k].Id, null);
-        }
-
-        var playerIndex = 0;
-        for (var k = requiredByes; k < pairingCount; k++)
-        {
-            pairings[k] = (players[playerIndex].Id, players[playerIndex + 1].Id);
-            playerIndex += 2;
-        }
+        var pairings = ComputeRound1Pairings(ordered, size, requiredByes);
 
         var rounds = RoundCount(size);
         var format = tournament.DefaultMatchFormat;
@@ -134,6 +114,39 @@ public static class SingleEliminationBracket
         }
 
         return matches;
+    }
+
+    /// <summary>
+    /// Computes round-1 pairings for a seeded roster: bye recipients occupy the first
+    /// <paramref name="requiredByes"/> pairing slots (participant only, no opponent), and the
+    /// remaining players fill the rest of the round in seed order, two at a time. Shared by Single
+    /// and Double Elimination bracket construction, which both use this exact convention.
+    /// </summary>
+    internal static (Guid? A, Guid? B)[] ComputeRound1Pairings(IReadOnlyList<Participant> ordered, int bracketSize, int requiredByes)
+    {
+        var byes = ordered.Where(p => p.HasBye).ToList();
+        if (byes.Count != requiredByes)
+        {
+            throw new DomainException($"Exactly {requiredByes} bye(s) must be selected; {byes.Count} chosen.");
+        }
+
+        var players = ordered.Where(p => !p.HasBye).ToList();
+        var pairingCount = bracketSize / 2;
+        var pairings = new (Guid? A, Guid? B)[pairingCount];
+
+        for (var k = 0; k < requiredByes; k++)
+        {
+            pairings[k] = (byes[k].Id, null);
+        }
+
+        var playerIndex = 0;
+        for (var k = requiredByes; k < pairingCount; k++)
+        {
+            pairings[k] = (players[playerIndex].Id, players[playerIndex + 1].Id);
+            playerIndex += 2;
+        }
+
+        return pairings;
     }
 
     /// <summary>The Winner-segment match/slot that a match at (round, indexInRound) feeds its winner into. Null once the match is the Final.</summary>

@@ -20,12 +20,12 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import CasinoIcon from '@mui/icons-material/Casino';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { generateBracket, listParticipants, startTournament, updateBracket } from '../api/tournaments';
-import type { Participant } from '../api/types';
+import type { Participant, TournamentType } from '../api/types';
 import { requiredByes } from '../api/types';
 import { extractErrorMessage } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
 
-export function BracketPreview({ tournamentId }: { tournamentId: string }) {
+export function BracketPreview({ tournamentId, tournamentType }: { tournamentId: string; tournamentType: TournamentType }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Participant[]>([]);
@@ -39,7 +39,7 @@ export function BracketPreview({ tournamentId }: { tournamentId: string }) {
   });
 
   const seeded = participants.length >= 2 && participants.every((p) => p.seed > 0);
-  const required = requiredByes(participants.length);
+  const required = requiredByes(participants.length, tournamentType);
 
   // Mirror server state into local editable state whenever there are no unsaved edits.
   useEffect(() => {

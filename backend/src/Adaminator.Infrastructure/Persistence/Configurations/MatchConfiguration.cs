@@ -43,6 +43,16 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
         builder.Property(m => m.CompletedAt);
         builder.Property(m => m.CompletionSequence);
 
+        // Double Elimination only: resolved (post bye-cascade) forward routes, set once at
+        // tournament start. Plain columns, not FK-constrained relationships - Match already has a
+        // cascading FK to Tournament, and a self-referencing FK here would hit "multiple cascade
+        // paths" in Postgres; referential integrity for these is an aggregate-internal concern,
+        // resolved in-memory by Tournament like every other cross-match lookup.
+        builder.Property(m => m.WinnerToMatchId);
+        builder.Property(m => m.WinnerToSlotA);
+        builder.Property(m => m.LoserToMatchId);
+        builder.Property(m => m.LoserToSlotA);
+
         builder.HasIndex(m => m.TournamentId);
 
         builder.HasMany(m => m.ScoreEntries)

@@ -24,11 +24,11 @@ import {
   removeParticipant,
   renameParticipant,
 } from '../api/tournaments';
-import type { Participant } from '../api/types';
+import type { Participant, TournamentType } from '../api/types';
 import { requiredByes } from '../api/types';
 import { extractErrorMessage } from '../api/client';
 
-export function ParticipantsSection({ tournamentId }: { tournamentId: string }) {
+export function ParticipantsSection({ tournamentId, tournamentType }: { tournamentId: string; tournamentType: TournamentType }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +75,7 @@ export function ParticipantsSection({ tournamentId }: { tournamentId: string }) 
 
   const count = participants.length;
   const countColor = count < 2 || count > 32 ? 'warning' : 'success';
+  const byesNeeded = requiredByes(count, tournamentType);
 
   return (
     <Card>
@@ -127,7 +128,7 @@ export function ParticipantsSection({ tournamentId }: { tournamentId: string }) 
 
         {count >= 2 && (
           <Typography variant="body2" color="text.secondary">
-            Requires {requiredByes(count)} bye{requiredByes(count) === 1 ? '' : 's'} for a {count}-participant bracket.
+            Requires {byesNeeded} bye{byesNeeded === 1 ? '' : 's'} for a {count}-participant bracket.
           </Typography>
         )}
       </CardContent>

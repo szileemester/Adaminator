@@ -139,8 +139,8 @@ export function TournamentDetailPage() {
 
       {tournament.status === 'Planned' ? (
         <>
-          <ParticipantsSection tournamentId={tournament.id} />
-          <BracketPreview tournamentId={tournament.id} />
+          <ParticipantsSection tournamentId={tournament.id} tournamentType={tournament.type} />
+          <BracketPreview tournamentId={tournament.id} tournamentType={tournament.type} />
         </>
       ) : (
         <Card>

@@ -44,8 +44,8 @@ public class BracketApiTests : IClassFixture<ApiFactory>
         start.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var bracket = await client.GetFromJsonAsync<BracketResponse>($"/api/tournaments/{tournamentId}/bracket", JsonOptions);
-        bracket!.Rounds.SelectMany(r => r.Matches).Count().Should().Be(4); // 5 participants -> 4 winner matches
-        bracket.Rounds.Last().Title.Should().Be("Final");
+        bracket!.WinnerRounds.SelectMany(r => r.Matches).Count().Should().Be(4); // 5 participants -> 4 winner matches
+        bracket.WinnerRounds.Last().Title.Should().Be("Final");
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class BracketApiTests : IClassFixture<ApiFactory>
 
         publicView!.Participants.Should().HaveCount(4);
         publicView.Bracket.Should().NotBeNull();
-        publicView.Bracket!.Rounds.SelectMany(r => r.Matches).Should().HaveCount(3);
+        publicView.Bracket!.WinnerRounds.SelectMany(r => r.Matches).Should().HaveCount(3);
     }
 
     private async Task<Guid> CreateTournamentAsync(HttpClient client, bool thirdPlace)
@@ -120,7 +120,7 @@ public class BracketApiTests : IClassFixture<ApiFactory>
 
     private record CreatedTournament(Guid Id, string PublicToken);
     private record ParticipantResponse(Guid Id, string Name, int Seed, bool HasBye);
-    private record BracketResponse(List<RoundResponse> Rounds);
+    private record BracketResponse(List<RoundResponse> WinnerRounds);
     private record RoundResponse(int Round, string Title, List<object> Matches);
     private record PublicResponse(List<ParticipantResponse> Participants, BracketResponse? Bracket);
     private record LoginBody(string Token);

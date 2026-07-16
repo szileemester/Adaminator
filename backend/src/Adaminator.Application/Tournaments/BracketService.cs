@@ -1,6 +1,7 @@
 using Adaminator.Application.Common;
 using Adaminator.Domain.Brackets;
 using Adaminator.Domain.Entities;
+using Adaminator.Domain.Enums;
 
 namespace Adaminator.Application.Tournaments;
 
@@ -24,7 +25,9 @@ public class BracketService
             .OrderBy(_ => Random.Shared.Next())
             .ToList();
 
-        var requiredByes = SingleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count);
+        var requiredByes = tournament.Type == TournamentType.DoubleElimination
+            ? DoubleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count)
+            : SingleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count);
         var defaultByes = shuffled.Take(requiredByes).ToList();
 
         tournament.ApplySeeding(shuffled, defaultByes);

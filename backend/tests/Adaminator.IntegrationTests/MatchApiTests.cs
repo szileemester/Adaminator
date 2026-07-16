@@ -28,7 +28,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var tournamentId = await CreateStartedFourPlayerTournamentAsync(client);
 
         var bracket = await GetBracketAsync(client, tournamentId);
-        var semifinals = bracket.Rounds.Single(r => r.Round == 1).Matches;
+        var semifinals = bracket.WinnerRounds.Single(r => r.Round == 1).Matches;
         var semi0 = semifinals[0];
         var semi1 = semifinals[1];
 
@@ -49,7 +49,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var completedSemi0 = MatchIn(afterComplete, semi0.Id);
         completedSemi0.Status.Should().Be("Completed");
         completedSemi0.WinnerId.Should().Be(semi0.ParticipantA!.ParticipantId);
-        var finalAfterOne = afterComplete.Rounds.Single(r => r.Round == 2).Matches.Single();
+        var finalAfterOne = afterComplete.WinnerRounds.Single(r => r.Round == 2).Matches.Single();
         finalAfterOne.ParticipantA!.ParticipantId.Should().Be(semi0.ParticipantA!.ParticipantId);
 
         // Forfeit the other semifinal -> its winner advances too.
@@ -60,9 +60,62 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var afterForfeit = await GetBracketAsync(client, tournamentId);
         var completedSemi1 = MatchIn(afterForfeit, semi1.Id);
         completedSemi1.Status.Should().Be("Forfeit");
-        var finalAfterBoth = afterForfeit.Rounds.Single(r => r.Round == 2).Matches.Single();
+        var finalAfterBoth = afterForfeit.WinnerRounds.Single(r => r.Round == 2).Matches.Single();
         finalAfterBoth.ParticipantA.Should().NotBeNull();
         finalAfterBoth.ParticipantB.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Double_elimination_full_flow_routes_through_winner_loser_and_grand_final()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var tournamentId = await CreateStartedFourPlayerTournamentAsync(client, "DoubleElimination");
+
+        var bracket = await GetBracketAsync(client, tournamentId);
+        bracket.LoserRounds.Should().NotBeEmpty();
+        bracket.GrandFinal.Should().NotBeNull();
+
+        var wb1 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[0];
+        var wb2 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[1];
+
+        async Task CompleteAsync(Guid matchId) =>
+            (await client.PostAsJsonAsync(
+                $"/api/tournaments/{tournamentId}/matches/{matchId}/complete",
+                new { matchFormat = "Bo3", scoreType = "Games", entries = new[] { Entry(true), Entry(true) } }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await CompleteAsync(wb1.Id);
+        await CompleteAsync(wb2.Id);
+
+        var afterWb1And2 = await GetBracketAsync(client, tournamentId);
+        var lb1 = afterWb1And2.LoserRounds.Single(r => r.Round == 1).Matches.Single();
+        lb1.ParticipantA.Should().NotBeNull();
+        lb1.ParticipantB.Should().NotBeNull(); // both round-1 losers routed into the same Loser Bracket match
+
+        await CompleteAsync(lb1.Id);
+
+        var wbFinal = (await GetBracketAsync(client, tournamentId)).WinnerRounds.Single(r => r.Round == 2).Matches.Single();
+        await CompleteAsync(wbFinal.Id);
+
+        var afterWbFinal = await GetBracketAsync(client, tournamentId);
+        var lbFinal = afterWbFinal.LoserRounds.Single(r => r.Round == 2).Matches.Single();
+        lbFinal.ParticipantA.Should().NotBeNull();
+        lbFinal.ParticipantB.Should().NotBeNull(); // the Winner Bracket Final's loser reached the Loser Bracket Final
+
+        await CompleteAsync(lbFinal.Id);
+
+        var afterLbFinal = await GetBracketAsync(client, tournamentId);
+        afterLbFinal.ThirdPlacePodium.Should().NotBeNull();
+        var grandFinal = afterLbFinal.GrandFinal!;
+        grandFinal.ParticipantA.Should().NotBeNull();
+        grandFinal.ParticipantB.Should().NotBeNull();
+
+        await CompleteAsync(grandFinal.Id);
+
+        var final = await GetBracketAsync(client, tournamentId);
+        final.GrandFinal!.WinnerId.Should().NotBeNull();
+        (await client.GetFromJsonAsync<TournamentStatusResponse>($"/api/tournaments/{tournamentId}", JsonOptions))!
+            .Status.Should().Be("Finished");
     }
 
     [Fact]
@@ -71,7 +124,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var client = await CreateAuthenticatedClientAsync();
         var tournamentId = await CreateStartedFourPlayerTournamentAsync(client);
         var bracket = await GetBracketAsync(client, tournamentId);
-        var semi0 = bracket.Rounds.Single(r => r.Round == 1).Matches[0];
+        var semi0 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[0];
 
         var complete = await client.PostAsJsonAsync(
             $"/api/tournaments/{tournamentId}/matches/{semi0.Id}/complete",
@@ -86,7 +139,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var client = await CreateAuthenticatedClientAsync();
         var tournamentId = await CreateStartedFourPlayerTournamentAsync(client);
         var bracket = await GetBracketAsync(client, tournamentId);
-        var final = bracket.Rounds.Single(r => r.Round == 2).Matches.Single();
+        var final = bracket.WinnerRounds.Single(r => r.Round == 2).Matches.Single();
 
         var save = await client.PutAsJsonAsync(
             $"/api/tournaments/{tournamentId}/matches/{final.Id}/result",
@@ -101,7 +154,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var client = await CreateAuthenticatedClientAsync();
         var tournamentId = await CreateStartedFourPlayerTournamentAsync(client);
         var bracket = await GetBracketAsync(client, tournamentId);
-        var semi0 = bracket.Rounds.Single(r => r.Round == 1).Matches[0];
+        var semi0 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[0];
 
         var save = await client.PutAsJsonAsync(
             $"/api/tournaments/{tournamentId}/matches/{semi0.Id}/result",
@@ -129,8 +182,8 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var client = await CreateAuthenticatedClientAsync();
         var tournamentId = await CreateStartedFourPlayerTournamentAsync(client);
         var bracket = await GetBracketAsync(client, tournamentId);
-        var semi0 = bracket.Rounds.Single(r => r.Round == 1).Matches[0];
-        var semi1 = bracket.Rounds.Single(r => r.Round == 1).Matches[1];
+        var semi0 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[0];
+        var semi1 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[1];
 
         await client.PostAsJsonAsync(
             $"/api/tournaments/{tournamentId}/matches/{semi0.Id}/complete",
@@ -148,7 +201,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
 
         var afterUndo = await GetBracketAsync(client, tournamentId);
         MatchIn(afterUndo, semi1.Id).Status.Should().Be("InProgress");
-        var final = afterUndo.Rounds.Single(r => r.Round == 2).Matches.Single();
+        var final = afterUndo.WinnerRounds.Single(r => r.Round == 2).Matches.Single();
         final.ParticipantB.Should().BeNull();
     }
 
@@ -158,7 +211,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var client = await CreateAuthenticatedClientAsync();
         var tournamentId = await CreateStartedFourPlayerTournamentAsync(client);
         var bracket = await GetBracketAsync(client, tournamentId);
-        var semi0 = bracket.Rounds.Single(r => r.Round == 1).Matches[0];
+        var semi0 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[0];
 
         var anonymous = _factory.CreateClient();
         var body = new { matchFormat = "Bo3", scoreType = "Games", entries = Array.Empty<object>() };
@@ -176,19 +229,19 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     private static object Entry(bool participantAWon) => new { scoreA = (int?)null, scoreB = (int?)null, participantAWon };
 
     private static MatchResponse MatchIn(BracketResponse bracket, Guid matchId) =>
-        bracket.Rounds.SelectMany(r => r.Matches).Concat(bracket.ThirdPlace is null ? [] : [bracket.ThirdPlace])
+        bracket.WinnerRounds.SelectMany(r => r.Matches).Concat(bracket.ThirdPlace is null ? [] : [bracket.ThirdPlace])
             .Single(m => m.Id == matchId);
 
     private async Task<BracketResponse> GetBracketAsync(HttpClient client, Guid tournamentId) =>
         (await client.GetFromJsonAsync<BracketResponse>($"/api/tournaments/{tournamentId}/bracket", JsonOptions))!;
 
-    private async Task<Guid> CreateStartedFourPlayerTournamentAsync(HttpClient client)
+    private async Task<Guid> CreateStartedFourPlayerTournamentAsync(HttpClient client, string type = "SingleElimination")
     {
         var response = await client.PostAsJsonAsync("/api/tournaments", new
         {
             name = $"Cup {Guid.NewGuid():N}",
             date = "2026-07-14",
-            type = "SingleElimination",
+            type,
             defaultMatchFormat = "Bo3",
             thirdPlaceEnabled = false
         });
@@ -216,6 +269,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     }
 
     private record CreatedTournament(Guid Id, string PublicToken);
+    private record TournamentStatusResponse(string Status);
     private record LoginBody(string Token);
     private record ParticipantSlotResponse(Guid ParticipantId, string Name);
     private record MatchResponse(
@@ -225,5 +279,10 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         List<object> Entries, int AggregateScoreA, int AggregateScoreB,
         DateTimeOffset? CompletedAt, bool CanUndo);
     private record RoundResponse(int Round, string Title, List<MatchResponse> Matches);
-    private record BracketResponse(List<RoundResponse> Rounds, MatchResponse? ThirdPlace);
+    private record BracketResponse(
+        List<RoundResponse> WinnerRounds,
+        List<RoundResponse> LoserRounds,
+        MatchResponse? GrandFinal,
+        MatchResponse? ThirdPlace,
+        ParticipantSlotResponse? ThirdPlacePodium);
 }

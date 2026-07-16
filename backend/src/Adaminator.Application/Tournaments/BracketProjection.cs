@@ -12,31 +12,72 @@ internal static class BracketProjection
     {
         var names = tournament.Participants.ToDictionary(p => p.Id, p => p.Name);
 
-        var winnerMatches = tournament.Matches
-            .Where(m => m.Segment == BracketSegment.Winner)
-            .OrderBy(m => m.Round)
-            .ThenBy(m => m.IndexInRound)
-            .ToList();
+        if (tournament.Type == TournamentType.DoubleElimination)
+        {
+            return BuildDoubleElimination(tournament, names);
+        }
 
+        var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
         var totalRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
-
-        var rounds = winnerMatches
-            .GroupBy(m => m.Round)
-            .OrderBy(g => g.Key)
-            .Select(g => new BracketRoundDto(
-                g.Key,
-                RoundTitle(g.Key, totalRounds),
-                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, names, tournament)).ToList()))
-            .ToList();
+        var rounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), names, tournament);
 
         var thirdPlace = tournament.Matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
 
         return new BracketDto(
             tournament.Type,
             tournament.Status,
-            rounds,
-            thirdPlace is null ? null : ToMatchDto(thirdPlace, names, tournament));
+            WinnerRounds: rounds,
+            LoserRounds: Array.Empty<BracketRoundDto>(),
+            GrandFinal: null,
+            ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, names, tournament),
+            ThirdPlacePodium: null);
     }
+
+    /// <summary>
+    /// Double Elimination has no separate Third Place match - <see cref="BracketDto.ThirdPlacePodium"/>
+    /// is derived from the Loser Bracket Final's own recorded result instead. Bye-cascade collapse
+    /// (see <see cref="Adaminator.Domain.Brackets.DoubleEliminationBracket"/>) can eliminate every
+    /// Loser Bracket match for very low participant counts, in which case there is no third place at all.
+    /// </summary>
+    private static BracketDto BuildDoubleElimination(Tournament tournament, IReadOnlyDictionary<Guid, string> names)
+    {
+        var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
+        var totalWinnerRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
+        var winnerRounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalWinnerRounds), names, tournament);
+
+        var loserMatches = SegmentMatches(tournament, BracketSegment.Loser);
+        var loserRounds = GroupIntoRounds(loserMatches, g => $"Round {g}", names, tournament);
+
+        var grandFinal = tournament.Matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
+        var thirdPlacePodium = ToSlot(tournament.ThirdPlaceParticipantId, names);
+
+        return new BracketDto(
+            tournament.Type,
+            tournament.Status,
+            winnerRounds,
+            loserRounds,
+            grandFinal is null ? null : ToMatchDto(grandFinal, names, tournament),
+            ThirdPlace: null,
+            thirdPlacePodium);
+    }
+
+    private static List<Match> SegmentMatches(Tournament tournament, BracketSegment segment) =>
+        tournament.Matches
+            .Where(m => m.Segment == segment)
+            .OrderBy(m => m.Round)
+            .ThenBy(m => m.IndexInRound)
+            .ToList();
+
+    private static IReadOnlyList<BracketRoundDto> GroupIntoRounds(
+        List<Match> matches, Func<int, string> title, IReadOnlyDictionary<Guid, string> names, Tournament tournament) =>
+        matches
+            .GroupBy(m => m.Round)
+            .OrderBy(g => g.Key)
+            .Select(g => new BracketRoundDto(
+                g.Key,
+                title(g.Key),
+                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, names, tournament)).ToList()))
+            .ToList();
 
     private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, string> names, Tournament tournament)
     {

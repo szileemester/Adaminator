@@ -149,7 +149,9 @@ public class Tournament
             throw new DomainException("Bye selection is invalid.");
         }
 
-        var requiredByes = SingleEliminationBracket.ComputeRequiredByes(_participants.Count);
+        var requiredByes = Type == TournamentType.DoubleElimination
+            ? DoubleEliminationBracket.ComputeRequiredByes(_participants.Count)
+            : SingleEliminationBracket.ComputeRequiredByes(_participants.Count);
         if (byeSet.Count != requiredByes)
         {
             throw new DomainException($"Exactly {requiredByes} bye(s) must be selected; {byeSet.Count} chosen.");
@@ -178,12 +180,14 @@ public class Tournament
         }
 
         // BuildMatches re-validates the bye count against the bracket size.
-        var matches = SingleEliminationBracket.BuildMatches(this);
+        var matches = Type == TournamentType.DoubleElimination
+            ? DoubleEliminationBracket.BuildMatches(this)
+            : SingleEliminationBracket.BuildMatches(this);
         _matches.AddRange(matches);
         Status = TournamentStatus.Running;
     }
 
-    // ---- Match results (Single Elimination; Double Elimination is a future milestone) ----
+    // ---- Match results ----
 
     /// <summary>Saves a (possibly partial) detailed score. Never decides the match (FR-MATCH-006/007).</summary>
     public void SaveMatchResult(Guid matchId, MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries) =>
@@ -213,6 +217,31 @@ public class Tournament
     }
 
     /// <summary>
+    /// Double Elimination only: the Loser Bracket Final's decided loser - there is no separate
+    /// Third Place match (BR-008). Null if undecided, or if this participant count's bye cascade
+    /// collapsed the Loser Bracket Final away entirely (see <see cref="Brackets.DoubleEliminationBracket"/>).
+    /// </summary>
+    public Guid? ThirdPlaceParticipantId
+    {
+        get
+        {
+            if (Type != TournamentType.DoubleElimination)
+            {
+                return null;
+            }
+
+            var finalRound = DoubleEliminationBracket.LoserRoundCount(DoubleEliminationBracket.ComputeBracketSize(_participants.Count));
+            var loserFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Loser && m.Round == finalRound);
+            if (loserFinal?.WinnerId is not { } winnerId)
+            {
+                return null;
+            }
+
+            return winnerId == loserFinal.ParticipantAId ? loserFinal.ParticipantBId : loserFinal.ParticipantAId;
+        }
+    }
+
+    /// <summary>
     /// True if <paramref name="matchId"/> is currently eligible for <see cref="UndoMatch"/> (BR-022):
     /// it is the tournament's most recently decided match and nothing it fed into has started yet.
     /// </summary>
@@ -224,8 +253,14 @@ public class Tournament
             return false;
         }
 
+        if (Type == TournamentType.DoubleElimination)
+        {
+            var (winnerRouteMatch, _, loserRouteMatch, _) = FindUndoDependentsDoubleElimination(match);
+            return !IsBlockedFrom(winnerRouteMatch, loserRouteMatch);
+        }
+
         var (nextWinnerMatch, _, thirdPlaceMatch) = FindUndoDependents(match);
-        return nextWinnerMatch is not { Status: not MatchStatus.Pending } && thirdPlaceMatch is not { Status: not MatchStatus.Pending };
+        return !IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch);
     }
 
     /// <summary>
@@ -245,18 +280,32 @@ public class Tournament
             throw new DomainException("Only the most recently completed match can be undone.");
         }
 
-        var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
+        var (winnerId, loserId) = WinnerAndLoser(match);
 
-        if (nextWinnerMatch is { Status: not MatchStatus.Pending } || thirdPlaceMatch is { Status: not MatchStatus.Pending })
+        if (Type == TournamentType.DoubleElimination)
         {
-            throw new DomainException("This match cannot be undone because a dependent match has already started.");
+            var (winnerRouteMatch, winnerRouteSlotA, loserRouteMatch, loserRouteSlotA) = FindUndoDependentsDoubleElimination(match);
+
+            if (IsBlockedFrom(winnerRouteMatch, loserRouteMatch))
+            {
+                throw new DomainException("This match cannot be undone because a dependent match has already started.");
+            }
+
+            winnerRouteMatch?.ClearSlot(winnerRouteSlotA, winnerId);
+            loserRouteMatch?.ClearSlot(loserRouteSlotA, loserId);
         }
+        else
+        {
+            var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
 
-        var winnerId = match.WinnerId!.Value;
-        var loserId = winnerId == match.ParticipantAId ? match.ParticipantBId!.Value : match.ParticipantAId!.Value;
+            if (IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch))
+            {
+                throw new DomainException("This match cannot be undone because a dependent match has already started.");
+            }
 
-        nextWinnerMatch?.ClearSlot(nextWinnerSlotA, winnerId);
-        thirdPlaceMatch?.ClearSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+            nextWinnerMatch?.ClearSlot(nextWinnerSlotA, winnerId);
+            thirdPlaceMatch?.ClearSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+        }
 
         if (Status == TournamentStatus.Finished)
         {
@@ -268,13 +317,18 @@ public class Tournament
 
     private void Advance(Match match)
     {
+        if (Type == TournamentType.DoubleElimination)
+        {
+            AdvanceDoubleElimination(match);
+            return;
+        }
+
         if (match.Segment != BracketSegment.Winner)
         {
             return;
         }
 
-        var winnerId = match.WinnerId!.Value;
-        var loserId = winnerId == match.ParticipantAId ? match.ParticipantBId!.Value : match.ParticipantAId!.Value;
+        var (winnerId, loserId) = WinnerAndLoser(match);
         var rounds = TotalRounds();
 
         var next = SingleEliminationBracket.NextWinnerSlot(match.Round, match.IndexInRound, rounds);
@@ -290,9 +344,40 @@ public class Tournament
         }
     }
 
+    /// <summary>
+    /// Double Elimination: routes are pre-resolved (through any bye-cascade collapse) once at
+    /// Start() time and stored directly on the match, so advancing just follows them - no round
+    /// math needed, unlike Single Elimination's on-the-fly <see cref="SingleEliminationBracket.NextWinnerSlot"/>.
+    /// </summary>
+    private void AdvanceDoubleElimination(Match match)
+    {
+        var (winnerId, loserId) = WinnerAndLoser(match);
+
+        if (match.WinnerToMatchId is { } winnerToMatchId)
+        {
+            FindMatch(winnerToMatchId).ResolveSlot(match.WinnerToSlotA!.Value, winnerId);
+        }
+
+        if (match.LoserToMatchId is { } loserToMatchId)
+        {
+            FindMatch(loserToMatchId).ResolveSlot(match.LoserToSlotA!.Value, loserId);
+        }
+    }
+
     /// <summary>The tournament is Finished once the Final (and, if enabled, Third Place) is decided.</summary>
     private void MaybeFinish()
     {
+        if (Type == TournamentType.DoubleElimination)
+        {
+            var grandFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
+            if (grandFinal is not null && IsDecided(grandFinal))
+            {
+                Status = TournamentStatus.Finished;
+            }
+
+            return;
+        }
+
         var rounds = TotalRounds();
         var final = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Winner && m.Round == rounds && m.IndexInRound == 0);
         if (final is null || !IsDecided(final))
@@ -313,6 +398,11 @@ public class Tournament
 
     private bool IsLatestDecided(Match match)
     {
+        if (match.CompletionSequence is null)
+        {
+            return false;
+        }
+
         var latestSequence = _matches.Where(m => m.CompletionSequence.HasValue).Max(m => m.CompletionSequence);
         return match.CompletionSequence == latestSequence;
     }
@@ -342,6 +432,31 @@ public class Tournament
 
         return (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch);
     }
+
+    /// <summary>
+    /// Double Elimination analog of <see cref="FindUndoDependents"/>: both of a match's own
+    /// pre-resolved routes (winner and loser) lead somewhere real, unlike Single Elimination's
+    /// single forward route plus an optional separate Third Place route - so this returns both
+    /// uniformly rather than forcing DE into that shape.
+    /// </summary>
+    private (Match? WinnerRouteMatch, bool WinnerRouteSlotA, Match? LoserRouteMatch, bool LoserRouteSlotA) FindUndoDependentsDoubleElimination(Match match)
+    {
+        var winnerRouteMatch = match.WinnerToMatchId is { } winnerToMatchId ? FindMatch(winnerToMatchId) : null;
+        var loserRouteMatch = match.LoserToMatchId is { } loserToMatchId ? FindMatch(loserToMatchId) : null;
+
+        return (winnerRouteMatch, match.WinnerToSlotA ?? false, loserRouteMatch, match.LoserToSlotA ?? false);
+    }
+
+    private static (Guid WinnerId, Guid LoserId) WinnerAndLoser(Match match)
+    {
+        var winnerId = match.WinnerId!.Value;
+        var loserId = winnerId == match.ParticipantAId ? match.ParticipantBId!.Value : match.ParticipantAId!.Value;
+        return (winnerId, loserId);
+    }
+
+    /// <summary>Whether an undo is blocked because either dependent match has already started.</summary>
+    private static bool IsBlockedFrom(Match? a, Match? b) =>
+        a is { Status: not MatchStatus.Pending } || b is { Status: not MatchStatus.Pending };
 
     private static bool IsDecided(Match match) => match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
 
