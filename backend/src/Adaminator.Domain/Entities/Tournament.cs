@@ -213,6 +213,22 @@ public class Tournament
     }
 
     /// <summary>
+    /// True if <paramref name="matchId"/> is currently eligible for <see cref="UndoMatch"/> (BR-022):
+    /// it is the tournament's most recently decided match and nothing it fed into has started yet.
+    /// </summary>
+    public bool CanUndo(Guid matchId)
+    {
+        var match = _matches.FirstOrDefault(m => m.Id == matchId);
+        if (match is null || !IsLatestDecided(match))
+        {
+            return false;
+        }
+
+        var (nextWinnerMatch, _, thirdPlaceMatch) = FindUndoDependents(match);
+        return nextWinnerMatch is not { Status: not MatchStatus.Pending } && thirdPlaceMatch is not { Status: not MatchStatus.Pending };
+    }
+
+    /// <summary>
     /// Reverts the chronologically latest completed/forfeited match, provided nothing it fed into
     /// has started yet (BR-022, FR-UNDO-001..004).
     /// </summary>
@@ -224,31 +240,12 @@ public class Tournament
             throw new DomainException("Only a completed or forfeited match can be undone.");
         }
 
-        var latestSequence = _matches.Where(m => m.CompletionSequence.HasValue).Max(m => m.CompletionSequence);
-        if (match.CompletionSequence != latestSequence)
+        if (!IsLatestDecided(match))
         {
             throw new DomainException("Only the most recently completed match can be undone.");
         }
 
-        var rounds = TotalRounds();
-
-        Match? nextWinnerMatch = null;
-        bool nextWinnerSlotA = false;
-        if (match.Segment == BracketSegment.Winner)
-        {
-            var next = SingleEliminationBracket.NextWinnerSlot(match.Round, match.IndexInRound, rounds);
-            if (next is not null)
-            {
-                nextWinnerMatch = FindWinnerMatch(next.Value.Round, next.Value.IndexInRound);
-                nextWinnerSlotA = next.Value.SlotA;
-            }
-        }
-
-        Match? thirdPlaceMatch = null;
-        if (ThirdPlaceEnabled && match.Segment == BracketSegment.Winner && match.Round == rounds - 1)
-        {
-            thirdPlaceMatch = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
-        }
+        var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
 
         if (nextWinnerMatch is { Status: not MatchStatus.Pending } || thirdPlaceMatch is { Status: not MatchStatus.Pending })
         {
@@ -313,6 +310,38 @@ public class Tournament
     }
 
     private int TotalRounds() => SingleEliminationBracket.RoundCount(SingleEliminationBracket.ComputeBracketSize(_participants.Count));
+
+    private bool IsLatestDecided(Match match)
+    {
+        var latestSequence = _matches.Where(m => m.CompletionSequence.HasValue).Max(m => m.CompletionSequence);
+        return match.CompletionSequence == latestSequence;
+    }
+
+    /// <summary>The downstream winner-slot and third-place matches, if any, that <paramref name="match"/> feeds into.</summary>
+    private (Match? NextWinnerMatch, bool NextWinnerSlotA, Match? ThirdPlaceMatch) FindUndoDependents(Match match)
+    {
+        var rounds = TotalRounds();
+
+        Match? nextWinnerMatch = null;
+        var nextWinnerSlotA = false;
+        if (match.Segment == BracketSegment.Winner)
+        {
+            var next = SingleEliminationBracket.NextWinnerSlot(match.Round, match.IndexInRound, rounds);
+            if (next is not null)
+            {
+                nextWinnerMatch = FindWinnerMatch(next.Value.Round, next.Value.IndexInRound);
+                nextWinnerSlotA = next.Value.SlotA;
+            }
+        }
+
+        Match? thirdPlaceMatch = null;
+        if (ThirdPlaceEnabled && match.Segment == BracketSegment.Winner && match.Round == rounds - 1)
+        {
+            thirdPlaceMatch = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+        }
+
+        return (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch);
+    }
 
     private static bool IsDecided(Match match) => match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
 

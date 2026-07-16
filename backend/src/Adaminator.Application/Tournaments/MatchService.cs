@@ -9,37 +9,34 @@ namespace Adaminator.Application.Tournaments;
 public class MatchService
 {
     private readonly ITournamentRepository _repository;
-    private readonly IValidator<SaveMatchResultRequest> _saveValidator;
-    private readonly IValidator<CompleteMatchRequest> _completeValidator;
+    private readonly IValidator<MatchScoreRequest> _scoreValidator;
     private readonly IValidator<ForfeitMatchRequest> _forfeitValidator;
     private readonly TimeProvider _timeProvider;
 
     public MatchService(
         ITournamentRepository repository,
-        IValidator<SaveMatchResultRequest> saveValidator,
-        IValidator<CompleteMatchRequest> completeValidator,
+        IValidator<MatchScoreRequest> scoreValidator,
         IValidator<ForfeitMatchRequest> forfeitValidator,
         TimeProvider timeProvider)
     {
         _repository = repository;
-        _saveValidator = saveValidator;
-        _completeValidator = completeValidator;
+        _scoreValidator = scoreValidator;
         _forfeitValidator = forfeitValidator;
         _timeProvider = timeProvider;
     }
 
-    public async Task<BracketDto> SaveResultAsync(Guid tournamentId, Guid matchId, SaveMatchResultRequest request, CancellationToken cancellationToken = default)
+    public async Task<BracketDto> SaveResultAsync(Guid tournamentId, Guid matchId, MatchScoreRequest request, CancellationToken cancellationToken = default)
     {
-        await _saveValidator.ValidateAndThrowAsync(request, cancellationToken);
+        await _scoreValidator.ValidateAndThrowAsync(request, cancellationToken);
         var tournament = await LoadAsync(tournamentId, cancellationToken);
         tournament.SaveMatchResult(matchId, request.MatchFormat, request.ScoreType, ToEntries(request.Entries));
         await _repository.SaveChangesAsync(cancellationToken);
         return BracketProjection.Build(tournament);
     }
 
-    public async Task<BracketDto> CompleteAsync(Guid tournamentId, Guid matchId, CompleteMatchRequest request, CancellationToken cancellationToken = default)
+    public async Task<BracketDto> CompleteAsync(Guid tournamentId, Guid matchId, MatchScoreRequest request, CancellationToken cancellationToken = default)
     {
-        await _completeValidator.ValidateAndThrowAsync(request, cancellationToken);
+        await _scoreValidator.ValidateAndThrowAsync(request, cancellationToken);
         var tournament = await LoadAsync(tournamentId, cancellationToken);
         tournament.CompleteMatch(matchId, request.MatchFormat, request.ScoreType, ToEntries(request.Entries), _timeProvider.GetUtcNow());
         await _repository.SaveChangesAsync(cancellationToken);

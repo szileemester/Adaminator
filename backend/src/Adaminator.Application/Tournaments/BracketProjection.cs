@@ -20,19 +20,13 @@ internal static class BracketProjection
 
         var totalRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
 
-        var latestCompletionSequence = tournament.Matches
-            .Where(m => m.CompletionSequence.HasValue)
-            .Select(m => m.CompletionSequence!.Value)
-            .DefaultIfEmpty(long.MinValue)
-            .Max();
-
         var rounds = winnerMatches
             .GroupBy(m => m.Round)
             .OrderBy(g => g.Key)
             .Select(g => new BracketRoundDto(
                 g.Key,
                 RoundTitle(g.Key, totalRounds),
-                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, names, latestCompletionSequence)).ToList()))
+                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, names, tournament)).ToList()))
             .ToList();
 
         var thirdPlace = tournament.Matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
@@ -41,10 +35,10 @@ internal static class BracketProjection
             tournament.Type,
             tournament.Status,
             rounds,
-            thirdPlace is null ? null : ToMatchDto(thirdPlace, names, latestCompletionSequence));
+            thirdPlace is null ? null : ToMatchDto(thirdPlace, names, tournament));
     }
 
-    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, string> names, long latestCompletionSequence)
+    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, string> names, Tournament tournament)
     {
         var entries = match.ScoreEntries
             .OrderBy(e => e.SequenceNumber)
@@ -69,7 +63,7 @@ internal static class BracketProjection
             aggregateA,
             aggregateB,
             match.CompletedAt,
-            CanUndo: match.CompletionSequence == latestCompletionSequence);
+            CanUndo: tournament.CanUndo(match.Id));
     }
 
     private static BracketSlotDto? ToSlot(Guid? participantId, IReadOnlyDictionary<Guid, string> names) =>

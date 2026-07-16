@@ -49,6 +49,12 @@ public class TournamentConfiguration : IEntityTypeConfiguration<Tournament>
 
         builder.Property(t => t.CreatedAt).IsRequired();
 
+        // Shadow row-version property; Npgsql's convention maps a uint concurrency token to the
+        // PostgreSQL system "xmin" column (no migration needed) so two requests racing to complete
+        // matches in the same tournament (e.g. NextCompletionSequence) can't silently overwrite each
+        // other - the loser gets DbUpdateConcurrencyException.
+        builder.Property<uint>("Version").IsRowVersion();
+
         // Aggregate children are exposed as read-only collections backed by private fields.
         builder.HasMany(t => t.Participants)
             .WithOne()

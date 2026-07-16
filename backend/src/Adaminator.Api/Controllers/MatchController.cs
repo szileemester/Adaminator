@@ -18,7 +18,7 @@ public class MatchController : ControllerBase
 
     /// <summary>Saves a (possibly partial) detailed score; the match stays undecided.</summary>
     [HttpPut("result")]
-    public async Task<ActionResult<BracketDto>> SaveResult(Guid tournamentId, Guid matchId, [FromBody] SaveMatchResultRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<BracketDto>> SaveResult(Guid tournamentId, Guid matchId, [FromBody] MatchScoreRequest request, CancellationToken cancellationToken)
     {
         var bracket = await _service.SaveResultAsync(tournamentId, matchId, request, cancellationToken);
         return Ok(bracket);
@@ -26,7 +26,7 @@ public class MatchController : ControllerBase
 
     /// <summary>Saves the deciding detailed score and advances the winner.</summary>
     [HttpPost("complete")]
-    public async Task<ActionResult<BracketDto>> Complete(Guid tournamentId, Guid matchId, [FromBody] CompleteMatchRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<BracketDto>> Complete(Guid tournamentId, Guid matchId, [FromBody] MatchScoreRequest request, CancellationToken cancellationToken)
     {
         var bracket = await _service.CompleteAsync(tournamentId, matchId, request, cancellationToken);
         return Ok(bracket);

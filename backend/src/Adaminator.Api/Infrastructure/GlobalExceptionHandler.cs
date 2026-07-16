@@ -3,6 +3,7 @@ using Adaminator.Domain.Exceptions;
 using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Adaminator.Api.Infrastructure;
 
@@ -52,6 +53,15 @@ public class GlobalExceptionHandler : IExceptionHandler
                     Status = StatusCodes.Status404NotFound,
                     Title = "Not found",
                     Detail = notFoundException.Message
+                };
+                break;
+
+            case DbUpdateConcurrencyException:
+                problem = new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Conflicting update",
+                    Detail = "This tournament was changed by another request at the same time. Reload and try again."
                 };
                 break;
 

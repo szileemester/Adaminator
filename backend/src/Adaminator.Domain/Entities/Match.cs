@@ -1,5 +1,10 @@
 using Adaminator.Domain.Enums;
 using Adaminator.Domain.Exceptions;
+// The MatchFormat/ScoreType properties below shadow their own enum type names, so unqualified
+// enum member access (e.g. ScoreType.Points) inside this class's instance methods fails with
+// CS0119; these aliases let call sites stay short instead of fully-qualifying every reference.
+using DomainMatchFormat = Adaminator.Domain.Enums.MatchFormat;
+using DomainScoreType = Adaminator.Domain.Enums.ScoreType;
 
 namespace Adaminator.Domain.Entities;
 
@@ -71,10 +76,7 @@ public class Match
         EnsureNotDecided();
         var built = BuildEntries(matchFormat, scoreType, entries);
 
-        MatchFormat = matchFormat;
-        ScoreType = scoreType;
-        _scoreEntries.Clear();
-        _scoreEntries.AddRange(built);
+        ApplyEntries(matchFormat, scoreType, built);
         WinnerId = null;
         Status = built.Count > 0 ? MatchStatus.InProgress : MatchStatus.Pending;
     }
@@ -108,14 +110,19 @@ public class Match
             throw new DomainException("Neither participant has reached the required number of wins yet.");
         }
 
-        MatchFormat = matchFormat;
-        ScoreType = scoreType;
-        _scoreEntries.Clear();
-        _scoreEntries.AddRange(built);
+        ApplyEntries(matchFormat, scoreType, built);
         WinnerId = winnerId;
         Status = MatchStatus.Completed;
         CompletedAt = completedAt;
         CompletionSequence = completionSequence;
+    }
+
+    private void ApplyEntries(MatchFormat matchFormat, ScoreType scoreType, List<ScoreEntry> built)
+    {
+        MatchFormat = matchFormat;
+        ScoreType = scoreType;
+        _scoreEntries.Clear();
+        _scoreEntries.AddRange(built);
     }
 
     /// <summary>Completes the match by forfeit. Detailed scores are not required and any previously saved partial score is left untouched (BR-020, FR-FORFEIT-001..004).</summary>
@@ -214,7 +221,7 @@ public class Match
             throw new DomainException($"A {matchFormat} match cannot have more than {maxGames} game(s)/set(s).");
         }
 
-        if (scoreType == Adaminator.Domain.Enums.ScoreType.WinnerOnly && matchFormat != Adaminator.Domain.Enums.MatchFormat.Bo1)
+        if (scoreType == DomainScoreType.WinnerOnly && matchFormat != DomainMatchFormat.Bo1)
         {
             throw new DomainException("Winner Only scoring is valid only for BO1 matches.");
         }
@@ -224,7 +231,7 @@ public class Match
         {
             var entry = entries[i];
 
-            if (scoreType == Adaminator.Domain.Enums.ScoreType.Points && (entry.ScoreA is null || entry.ScoreB is null))
+            if (scoreType == DomainScoreType.Points && (entry.ScoreA is null || entry.ScoreB is null))
             {
                 throw new DomainException("Points scoring requires a numeric score for both participants in every entry.");
             }

@@ -352,6 +352,34 @@ public class MatchResultTests
     }
 
     [Fact]
+    public void CanUndo_is_true_for_the_single_latest_completed_match()
+    {
+        var tournament = StartedFourPlayer();
+        var semi0 = Semifinal(tournament, 0);
+        Complete(tournament, semi0, semi0.ParticipantAId!.Value, Now);
+
+        tournament.CanUndo(semi0.Id).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CanUndo_is_false_once_the_dependent_match_has_started_even_though_it_is_still_the_latest_by_sequence()
+    {
+        // Regression: a partial SaveMatchResult on the Final doesn't consume a CompletionSequence,
+        // so semi1 (the last *completed* match) stays "latest by sequence" - but UndoMatch would
+        // still reject it once the Final has started, so CanUndo must reflect that too.
+        var tournament = StartedFourPlayer();
+        var semi0 = Semifinal(tournament, 0);
+        var semi1 = Semifinal(tournament, 1);
+        Complete(tournament, semi0, semi0.ParticipantAId!.Value, Now);
+        Complete(tournament, semi1, semi1.ParticipantAId!.Value, Now);
+
+        var final = Final(tournament);
+        tournament.SaveMatchResult(final.Id, final.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, true) });
+
+        tournament.CanUndo(semi1.Id).Should().BeFalse();
+    }
+
+    [Fact]
     public void UndoMatch_is_blocked_when_only_the_third_place_match_has_started()
     {
         var tournament = StartedFourPlayer(thirdPlace: true);

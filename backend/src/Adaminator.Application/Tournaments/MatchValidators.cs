@@ -11,19 +11,9 @@ public class ScoreEntryInputDtoValidator : AbstractValidator<ScoreEntryInputDto>
     }
 }
 
-public class SaveMatchResultRequestValidator : AbstractValidator<SaveMatchResultRequest>
+public class MatchScoreRequestValidator : AbstractValidator<MatchScoreRequest>
 {
-    public SaveMatchResultRequestValidator()
-    {
-        RuleFor(x => x.MatchFormat).IsInEnum();
-        RuleFor(x => x.ScoreType).IsInEnum();
-        RuleForEach(x => x.Entries).SetValidator(new ScoreEntryInputDtoValidator());
-    }
-}
-
-public class CompleteMatchRequestValidator : AbstractValidator<CompleteMatchRequest>
-{
-    public CompleteMatchRequestValidator()
+    public MatchScoreRequestValidator()
     {
         RuleFor(x => x.MatchFormat).IsInEnum();
         RuleFor(x => x.ScoreType).IsInEnum();
