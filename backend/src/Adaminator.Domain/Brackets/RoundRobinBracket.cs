@@ -44,6 +44,7 @@ public static class RoundRobinBracket
         var n = slots.Count;
         var rounds = n - 1;
         var format = tournament.DefaultMatchFormat;
+        var scoreType = tournament.DefaultScoreType;
         var matches = new List<Match>();
 
         for (var round = 1; round <= rounds; round++)
@@ -55,7 +56,7 @@ public static class RoundRobinBracket
                 var b = slots[n - 1 - i];
                 if (a is not null && b is not null)
                 {
-                    matches.Add(Match.Create(tournament.Id, BracketSegment.RoundRobin, round, indexInRound, a, b, format));
+                    matches.Add(Match.Create(tournament.Id, BracketSegment.RoundRobin, round, indexInRound, a, b, format, scoreType));
                     indexInRound++;
                 }
             }

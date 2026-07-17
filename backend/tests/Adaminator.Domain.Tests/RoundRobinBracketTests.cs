@@ -12,7 +12,7 @@ public class RoundRobinBracketTests
 
     private static Tournament Seeded(int participantCount)
     {
-        var tournament = Tournament.Create("League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, false, CreatedAt);
+        var tournament = Tournament.Create("League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt);
         for (var i = 1; i <= participantCount; i++)
         {
             tournament.AddParticipant($"P{i}");

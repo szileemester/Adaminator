@@ -36,8 +36,99 @@ internal static class BracketProjection
             GrandFinal: null,
             ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, names, tournament),
             ThirdPlacePodium: null,
-            Standings: Array.Empty<StandingRowDto>());
+            Standings: Array.Empty<StandingRowDto>(),
+            Placements: BuildSingleEliminationPlacements(winnerMatches, totalRounds, thirdPlace, names),
+            CanFinish: tournament.CanFinish);
     }
+
+    /// <summary>
+    /// Champion/Runner-up/3rd-Place (or "4th Place"/"Semifinalists" when Third Place is undecided or
+    /// disabled), then everyone else grouped by the round they were eliminated in (a tie if more than
+    /// one match in that round has been decided). Rank numbers reflect each round's fixed match count
+    /// (a bye pairing never gets a Match row, so counting rows already excludes it) even before that
+    /// round is fully decided, so a group's rank range doesn't shift as later results come in; the
+    /// group itself is only emitted once at least one of its matches is decided, so the leaderboard
+    /// fills in progressively as the tournament runs rather than waiting for it to finish.
+    /// </summary>
+    private static IReadOnlyList<PlacementGroupDto> BuildSingleEliminationPlacements(
+        List<Match> winnerMatches, int totalRounds, Match? thirdPlace, IReadOnlyDictionary<Guid, string> names)
+    {
+        var groups = new List<PlacementGroupDto>();
+        var rank = 1;
+
+        var final = winnerMatches.FirstOrDefault(m => m.Round == totalRounds);
+        AddPodium(groups, ref rank, final, names);
+
+        if (totalRounds >= 2)
+        {
+            var semifinalRound = totalRounds - 1;
+            var semifinalSize = winnerMatches.Count(m => m.Round == semifinalRound);
+            var semifinalLosers = DecidedLoserIds(winnerMatches, semifinalRound);
+
+            if (semifinalLosers.Count > 0)
+            {
+                if (thirdPlace is { IsDecided: true })
+                {
+                    groups.Add(new PlacementGroupDto(rank, rank, "3rd Place", new[] { ToSlot(thirdPlace.WinnerId, names)! }));
+                    groups.Add(new PlacementGroupDto(rank + 1, rank + 1, "4th Place", new[] { ToSlot(thirdPlace.LoserId, names)! }));
+                }
+                else
+                {
+                    groups.Add(new PlacementGroupDto(rank, rank + semifinalSize - 1, "Semifinalists", ToSlots(semifinalLosers, names)));
+                }
+            }
+
+            rank += semifinalSize;
+        }
+
+        for (var r = totalRounds - 2; r >= 1; r--)
+        {
+            AddRoundGroup(groups, ref rank, winnerMatches, r, $"Eliminated in {RoundTitle(r, totalRounds)}", names);
+        }
+
+        return groups;
+    }
+
+    /// <summary>Adds "Champion"/"Runner-up" for ranks 1-2 if <paramref name="decidingMatch"/> is decided, always advancing past both ranks either way.</summary>
+    private static void AddPodium(List<PlacementGroupDto> groups, ref int rank, Match? decidingMatch, IReadOnlyDictionary<Guid, string> names)
+    {
+        var decided = decidingMatch?.IsDecided == true;
+
+        if (decided)
+        {
+            groups.Add(new PlacementGroupDto(rank, rank, "Champion", new[] { ToSlot(decidingMatch!.WinnerId, names)! }));
+        }
+
+        rank++;
+
+        if (decided)
+        {
+            groups.Add(new PlacementGroupDto(rank, rank, "Runner-up", new[] { ToSlot(decidingMatch!.LoserId, names)! }));
+        }
+
+        rank++;
+    }
+
+    /// <summary>
+    /// Adds a tied placement group for every decided match at <paramref name="round"/>, sized to the
+    /// round's full match count (so the rank range is exact even before every match in it is
+    /// decided), and always advances <paramref name="rank"/> past the round regardless.
+    /// </summary>
+    private static void AddRoundGroup(
+        List<PlacementGroupDto> groups, ref int rank, List<Match> matches, int round, string label, IReadOnlyDictionary<Guid, string> names)
+    {
+        var roundSize = matches.Count(m => m.Round == round);
+        var losers = DecidedLoserIds(matches, round);
+        if (losers.Count > 0)
+        {
+            groups.Add(new PlacementGroupDto(rank, rank + roundSize - 1, label, ToSlots(losers, names)));
+        }
+
+        rank += roundSize;
+    }
+
+    private static List<Guid> DecidedLoserIds(List<Match> matches, int round) =>
+        matches.Where(m => m.Round == round && m.IsDecided).Select(m => m.LoserId!.Value).ToList();
 
     /// <summary>
     /// Round Robin has no advancement, so its "bracket" is just a flat list of rounds - reusing
@@ -57,7 +148,9 @@ internal static class BracketProjection
             GrandFinal: null,
             ThirdPlace: null,
             ThirdPlacePodium: null,
-            Standings: BuildStandings(matches, names));
+            Standings: BuildStandings(matches, names),
+            Placements: Array.Empty<PlacementGroupDto>(),
+            CanFinish: tournament.CanFinish);
     }
 
     /// <summary>
@@ -116,7 +209,38 @@ internal static class BracketProjection
             grandFinal is null ? null : ToMatchDto(grandFinal, names, tournament),
             ThirdPlace: null,
             thirdPlacePodium,
-            Standings: Array.Empty<StandingRowDto>());
+            Standings: Array.Empty<StandingRowDto>(),
+            Placements: BuildDoubleEliminationPlacements(grandFinal, thirdPlacePodium, loserMatches, names),
+            CanFinish: tournament.CanFinish);
+    }
+
+    /// <summary>
+    /// Champion/Runner-up/3rd Place (the latter reusing <see cref="Tournament.ThirdPlaceParticipantId"/>
+    /// rather than re-deriving it), then everyone else grouped by the Loser Bracket round they were
+    /// eliminated in (excluding the Loser Bracket Final, whose loser is already 3rd Place).
+    /// </summary>
+    private static IReadOnlyList<PlacementGroupDto> BuildDoubleEliminationPlacements(
+        Match? grandFinal, BracketSlotDto? thirdPlacePodium, List<Match> loserMatches, IReadOnlyDictionary<Guid, string> names)
+    {
+        var groups = new List<PlacementGroupDto>();
+        var rank = 1;
+
+        AddPodium(groups, ref rank, grandFinal, names);
+
+        if (thirdPlacePodium is not null)
+        {
+            groups.Add(new PlacementGroupDto(rank, rank, "3rd Place", new[] { thirdPlacePodium }));
+        }
+
+        rank++;
+
+        var lbFinalRound = loserMatches.Count == 0 ? 0 : loserMatches.Max(m => m.Round);
+        for (var r = lbFinalRound - 1; r >= 1; r--)
+        {
+            AddRoundGroup(groups, ref rank, loserMatches, r, $"Eliminated in Loser Bracket Round {r}", names);
+        }
+
+        return groups;
     }
 
     private static List<Match> SegmentMatches(Tournament tournament, BracketSegment segment) =>
@@ -167,6 +291,9 @@ internal static class BracketProjection
 
     private static BracketSlotDto? ToSlot(Guid? participantId, IReadOnlyDictionary<Guid, string> names) =>
         participantId is null ? null : new BracketSlotDto(participantId.Value, names.GetValueOrDefault(participantId.Value, "?"));
+
+    private static IReadOnlyList<BracketSlotDto> ToSlots(IEnumerable<Guid> participantIds, IReadOnlyDictionary<Guid, string> names) =>
+        participantIds.Select(id => ToSlot(id, names)!).ToList();
 
     /// <summary>Plain "Round N" title, used where rounds never get a Final/Semifinals-style name (Round Robin, the Loser Bracket).</summary>
     private static string PlainRoundTitle(int round) => $"Round {round}";

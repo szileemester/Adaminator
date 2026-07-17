@@ -29,6 +29,7 @@ public class Tournament
     public string? Notes { get; private set; }
     public TournamentType Type { get; private set; }
     public MatchFormat DefaultMatchFormat { get; private set; }
+    public ScoreType DefaultScoreType { get; private set; }
 
     /// <summary>Third Place Match is only ever enabled for Single Elimination (BR-006, FR-TOUR-007/008).</summary>
     public bool ThirdPlaceEnabled { get; private set; }
@@ -55,6 +56,7 @@ public class Tournament
         string? notes,
         TournamentType type,
         MatchFormat defaultMatchFormat,
+        ScoreType defaultScoreType,
         bool thirdPlaceEnabled,
         DateTimeOffset createdAt)
     {
@@ -66,7 +68,7 @@ public class Tournament
             CreatedAt = createdAt
         };
 
-        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, thirdPlaceEnabled);
+        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled);
         return tournament;
     }
 
@@ -77,10 +79,11 @@ public class Tournament
         string? notes,
         TournamentType type,
         MatchFormat defaultMatchFormat,
+        ScoreType defaultScoreType,
         bool thirdPlaceEnabled)
     {
         EnsurePlanned("edited");
-        SetDetails(name, date, notes, type, defaultMatchFormat, thirdPlaceEnabled);
+        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled);
     }
 
     // ---- Participant management (Planned only) ----
@@ -210,7 +213,6 @@ public class Tournament
         var match = FindMatch(matchId);
         match.Complete(matchFormat, scoreType, entries, NextCompletionSequence(), completedAt);
         Advance(match);
-        MaybeFinish();
     }
 
     /// <summary>Completes a match by forfeit; the selected winner advances normally (BR-020, FR-FORFEIT-001..004).</summary>
@@ -219,7 +221,28 @@ public class Tournament
         var match = FindMatch(matchId);
         match.CompleteAsForfeit(winnerId, NextCompletionSequence(), completedAt);
         Advance(match);
-        MaybeFinish();
+    }
+
+    /// <summary>True once every deciding match is decided and the admin can finish the tournament by hand.</summary>
+    public bool CanFinish => Status == TournamentStatus.Running && IsReadyToFinish();
+
+    /// <summary>
+    /// Manually transitions a Running tournament to Finished. Finishing is a deliberate admin action,
+    /// not automatic - completing the last match only makes <see cref="CanFinish"/> true.
+    /// </summary>
+    public void Finish()
+    {
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("Only a Running tournament can be finished.");
+        }
+
+        if (!IsReadyToFinish())
+        {
+            throw new DomainException("The tournament cannot be finished until all matches are decided.");
+        }
+
+        Status = TournamentStatus.Finished;
     }
 
     /// <summary>
@@ -383,44 +406,29 @@ public class Tournament
         }
     }
 
-    /// <summary>The tournament is Finished once the Final (and, if enabled, Third Place) is decided.</summary>
-    private void MaybeFinish()
+    /// <summary>Whether the Final (and, if enabled, Third Place) - or the Grand Final, or every match for Round Robin - is decided.</summary>
+    private bool IsReadyToFinish()
     {
         if (Type == TournamentType.DoubleElimination)
         {
             var grandFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
-            if (grandFinal is not null && IsDecided(grandFinal))
-            {
-                Status = TournamentStatus.Finished;
-            }
-
-            return;
+            return grandFinal is not null && IsDecided(grandFinal);
         }
 
         if (Type == TournamentType.RoundRobin)
         {
-            if (_matches.All(IsDecided))
-            {
-                Status = TournamentStatus.Finished;
-            }
-
-            return;
+            return _matches.All(IsDecided);
         }
 
         var rounds = TotalRounds();
         var final = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Winner && m.Round == rounds && m.IndexInRound == 0);
         if (final is null || !IsDecided(final))
         {
-            return;
+            return false;
         }
 
         var thirdPlace = _matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
-        if (thirdPlace is not null && !IsDecided(thirdPlace))
-        {
-            return;
-        }
-
-        Status = TournamentStatus.Finished;
+        return thirdPlace is null || IsDecided(thirdPlace);
     }
 
     private int TotalRounds() => SingleEliminationBracket.RoundCount(SingleEliminationBracket.ComputeBracketSize(_participants.Count));
@@ -476,18 +484,13 @@ public class Tournament
         return (winnerRouteMatch, match.WinnerToSlotA ?? false, loserRouteMatch, match.LoserToSlotA ?? false);
     }
 
-    private static (Guid WinnerId, Guid LoserId) WinnerAndLoser(Match match)
-    {
-        var winnerId = match.WinnerId!.Value;
-        var loserId = winnerId == match.ParticipantAId ? match.ParticipantBId!.Value : match.ParticipantAId!.Value;
-        return (winnerId, loserId);
-    }
+    private static (Guid WinnerId, Guid LoserId) WinnerAndLoser(Match match) => (match.WinnerId!.Value, match.LoserId!.Value);
 
     /// <summary>Whether an undo is blocked because either dependent match has already started.</summary>
     private static bool IsBlockedFrom(Match? a, Match? b) =>
         a is { Status: not MatchStatus.Pending } || b is { Status: not MatchStatus.Pending };
 
-    private static bool IsDecided(Match match) => match.Status is MatchStatus.Completed or MatchStatus.Forfeit;
+    private static bool IsDecided(Match match) => match.IsDecided;
 
     private long NextCompletionSequence() =>
         _matches.Where(m => m.CompletionSequence.HasValue).Select(m => m.CompletionSequence!.Value).DefaultIfEmpty(0L).Max() + 1;
@@ -505,6 +508,7 @@ public class Tournament
         string? notes,
         TournamentType type,
         MatchFormat defaultMatchFormat,
+        ScoreType defaultScoreType,
         bool thirdPlaceEnabled)
     {
         name = (name ?? string.Empty).Trim();
@@ -529,11 +533,17 @@ public class Tournament
             throw new DomainException("Third place match is available only for Single Elimination tournaments.");
         }
 
+        if (defaultScoreType == ScoreType.WinnerOnly && defaultMatchFormat != MatchFormat.Bo1)
+        {
+            throw new DomainException("Winner Only scoring is valid only for BO1 matches.");
+        }
+
         Name = name;
         Date = date;
         Notes = notes;
         Type = type;
         DefaultMatchFormat = defaultMatchFormat;
+        DefaultScoreType = defaultScoreType;
         ThirdPlaceEnabled = type == TournamentType.SingleElimination && thirdPlaceEnabled;
     }
 

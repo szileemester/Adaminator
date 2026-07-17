@@ -34,6 +34,11 @@ public class TournamentConfiguration : IEntityTypeConfiguration<Tournament>
             .HasMaxLength(10)
             .IsRequired();
 
+        builder.Property(t => t.DefaultScoreType)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+
         builder.Property(t => t.Status)
             .HasConversion<string>()
             .HasMaxLength(20)

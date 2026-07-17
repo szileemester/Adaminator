@@ -37,6 +37,7 @@ public class TournamentService
             request.Notes,
             request.Type,
             request.DefaultMatchFormat,
+            request.DefaultScoreType,
             request.ThirdPlaceEnabled,
             _timeProvider.GetUtcNow());
 
@@ -59,6 +60,7 @@ public class TournamentService
             request.Notes,
             request.Type,
             request.DefaultMatchFormat,
+            request.DefaultScoreType,
             request.ThirdPlaceEnabled);
 
         await _repository.SaveChangesAsync(cancellationToken);

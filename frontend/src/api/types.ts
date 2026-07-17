@@ -19,6 +19,7 @@ export interface Tournament {
   type: TournamentType;
   defaultMatchFormat: MatchFormat;
   thirdPlaceEnabled: boolean;
+  defaultScoreType: ScoreType;
   status: TournamentStatus;
   publicToken: string;
   createdAt: string;
@@ -81,6 +82,14 @@ export interface StandingRow {
   losses: number;
 }
 
+/** Single/Double Elimination only: one rung of the final-placements leaderboard; more than one participant means a tie. */
+export interface PlacementGroup {
+  rankStart: number;
+  rankEnd: number;
+  label: string;
+  participants: BracketSlot[];
+}
+
 export interface Bracket {
   type: TournamentType;
   status: TournamentStatus;
@@ -96,6 +105,10 @@ export interface Bracket {
   thirdPlacePodium: BracketSlot | null;
   /** Round Robin only: participants ranked by win-loss record; empty for other tournament types. */
   standings: StandingRow[];
+  /** Single/Double Elimination only: Champion/Runner-up/3rd place and eliminations by round; empty for Round Robin. */
+  placements: PlacementGroup[];
+  /** True once every deciding match is decided and the admin can finish the tournament by hand. */
+  canFinish: boolean;
 }
 
 export interface PublicTournament {
@@ -104,6 +117,7 @@ export interface PublicTournament {
   notes: string | null;
   type: TournamentType;
   defaultMatchFormat: MatchFormat;
+  defaultScoreType: ScoreType;
   status: TournamentStatus;
   participants: Participant[];
   bracket: Bracket | null;
@@ -135,6 +149,7 @@ export interface TournamentInput {
   type: TournamentType;
   defaultMatchFormat: MatchFormat;
   thirdPlaceEnabled: boolean;
+  defaultScoreType: ScoreType;
 }
 
 export const tournamentTypeLabels: Record<TournamentType, string> = {

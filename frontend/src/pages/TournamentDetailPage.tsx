@@ -19,21 +19,24 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { deleteTournament, getBracket, getTournament } from '../api/tournaments';
-import { matchFormatLabels, tournamentTypeLabels } from '../api/types';
+import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import { deleteTournament, finishTournament, getBracket, getTournament } from '../api/tournaments';
+import { extractErrorMessage } from '../api/client';
+import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
 import { StatusChip } from '../components/StatusChip';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ParticipantsSection } from '../components/ParticipantsSection';
 import { BracketPreview } from '../components/BracketPreview';
 import { BracketView } from '../components/BracketView';
-import { extractErrorMessage } from '../api/client';
 
 export function TournamentDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmFinishOpen, setConfirmFinishOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [finishError, setFinishError] = useState<string | null>(null);
 
   const { data: tournament, isLoading, isError, error } = useQuery({
     queryKey: ['tournaments', id],
@@ -54,6 +57,22 @@ export function TournamentDetailPage() {
     queryKey: ['bracket', id],
     queryFn: () => getBracket(id),
     enabled: Boolean(tournament) && !isPlanned,
+  });
+
+  const finishMutation = useMutation({
+    mutationFn: () => finishTournament(id),
+    onSuccess: async () => {
+      setConfirmFinishOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tournaments'] }),
+        queryClient.invalidateQueries({ queryKey: ['tournaments', id] }),
+        queryClient.invalidateQueries({ queryKey: ['bracket', id] }),
+      ]);
+    },
+    onError: (err) => {
+      setConfirmFinishOpen(false);
+      setFinishError(extractErrorMessage(err));
+    },
   });
 
   if (isLoading) {
@@ -108,6 +127,7 @@ export function TournamentDetailPage() {
             <DetailRow label="Date" value={tournament.date} />
             <DetailRow label="Type" value={tournamentTypeLabels[tournament.type]} />
             <DetailRow label="Default match format" value={matchFormatLabels[tournament.defaultMatchFormat]} />
+            <DetailRow label="Default score type" value={scoreTypeLabels[tournament.defaultScoreType]} />
             <DetailRow label="Third place match" value={tournament.thirdPlaceEnabled ? 'Enabled' : 'Disabled'} />
             <DetailRow
               label="Notes"
@@ -126,9 +146,28 @@ export function TournamentDetailPage() {
       ) : (
         <Card>
           <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Bracket
-            </Typography>
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+              <Typography variant="h6">Bracket</Typography>
+              {tournament.status === 'Running' && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="success"
+                  startIcon={<EmojiEventsIcon />}
+                  disabled={!bracket?.canFinish}
+                  onClick={() => setConfirmFinishOpen(true)}
+                >
+                  Finish tournament
+                </Button>
+              )}
+            </Stack>
+
+            {finishError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setFinishError(null)}>
+                {finishError}
+              </Alert>
+            )}
+
             {bracket ? (
               <BracketView bracket={bracket} tournamentId={tournament.id} />
             ) : (
@@ -168,6 +207,17 @@ export function TournamentDetailPage() {
         busy={deleteMutation.isPending}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => deleteMutation.mutate()}
+      />
+
+      <ConfirmDialog
+        open={confirmFinishOpen}
+        title="Finish tournament"
+        message="This marks the tournament as Finished. You can undo the latest match result afterward to reopen it if needed."
+        confirmLabel="Finish"
+        confirmColor="success"
+        busy={finishMutation.isPending}
+        onCancel={() => setConfirmFinishOpen(false)}
+        onConfirm={() => finishMutation.mutate()}
       />
 
       <Snackbar

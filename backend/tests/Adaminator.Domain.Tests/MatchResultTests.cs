@@ -14,7 +14,7 @@ public class MatchResultTests
 
     private static Tournament StartedFourPlayer(bool thirdPlace = false, MatchFormat format = MatchFormat.Bo3)
     {
-        var tournament = Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, format, thirdPlace, CreatedAt);
+        var tournament = Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, format, ScoreType.Games, thirdPlace, CreatedAt);
         for (var i = 1; i <= 4; i++)
         {
             tournament.AddParticipant($"P{i}");
@@ -259,7 +259,7 @@ public class MatchResultTests
     // ---- Tournament completion ----
 
     [Fact]
-    public void Tournament_finishes_once_the_final_is_decided_without_third_place()
+    public void Tournament_stays_running_after_the_final_is_decided_until_finished_by_hand()
     {
         var tournament = StartedFourPlayer();
         var semi0 = Semifinal(tournament, 0);
@@ -269,11 +269,27 @@ public class MatchResultTests
 
         Complete(tournament, Final(tournament), Final(tournament).ParticipantAId!.Value, Now);
 
+        tournament.Status.Should().Be(TournamentStatus.Running);
+        tournament.CanFinish.Should().BeTrue();
+
+        tournament.Finish();
+
         tournament.Status.Should().Be(TournamentStatus.Finished);
     }
 
     [Fact]
-    public void Tournament_finish_waits_for_third_place_when_enabled()
+    public void Finish_is_rejected_before_the_final_is_decided()
+    {
+        var tournament = StartedFourPlayer();
+        var semi0 = Semifinal(tournament, 0);
+        Complete(tournament, semi0, semi0.ParticipantAId!.Value, Now);
+
+        tournament.CanFinish.Should().BeFalse();
+        tournament.Invoking(t => t.Finish()).Should().Throw<DomainException>().WithMessage("*cannot be finished*");
+    }
+
+    [Fact]
+    public void Finish_waits_for_third_place_when_enabled()
     {
         var tournament = StartedFourPlayer(thirdPlace: true);
         var semi0 = Semifinal(tournament, 0);
@@ -282,10 +298,39 @@ public class MatchResultTests
         Complete(tournament, semi1, semi1.ParticipantAId!.Value, Now);
 
         Complete(tournament, Final(tournament), Final(tournament).ParticipantAId!.Value, Now);
-        tournament.Status.Should().Be(TournamentStatus.Running);
+        tournament.CanFinish.Should().BeFalse();
+        tournament.Invoking(t => t.Finish()).Should().Throw<DomainException>();
 
         Complete(tournament, ThirdPlace(tournament), ThirdPlace(tournament).ParticipantAId!.Value, Now);
+        tournament.CanFinish.Should().BeTrue();
+
+        tournament.Finish();
+
         tournament.Status.Should().Be(TournamentStatus.Finished);
+    }
+
+    [Fact]
+    public void Finish_is_rejected_when_still_planned()
+    {
+        var tournament = Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, MatchFormat.Bo3, ScoreType.Games, false, CreatedAt);
+        tournament.AddParticipant("A");
+        tournament.AddParticipant("B");
+
+        tournament.Invoking(t => t.Finish()).Should().Throw<DomainException>().WithMessage("*Only a Running tournament*");
+    }
+
+    [Fact]
+    public void Finish_is_rejected_once_already_finished()
+    {
+        var tournament = StartedFourPlayer();
+        var semi0 = Semifinal(tournament, 0);
+        var semi1 = Semifinal(tournament, 1);
+        Complete(tournament, semi0, semi0.ParticipantAId!.Value, Now);
+        Complete(tournament, semi1, semi1.ParticipantAId!.Value, Now);
+        Complete(tournament, Final(tournament), Final(tournament).ParticipantAId!.Value, Now);
+        tournament.Finish();
+
+        tournament.Invoking(t => t.Finish()).Should().Throw<DomainException>().WithMessage("*Only a Running tournament*");
     }
 
     // ---- Undo (BR-022, FR-UNDO-001..005) ----
@@ -408,6 +453,7 @@ public class MatchResultTests
         Complete(tournament, semi1, semi1.ParticipantAId!.Value, Now);
         var final = Final(tournament);
         Complete(tournament, final, final.ParticipantAId!.Value, Now);
+        tournament.Finish();
         tournament.Status.Should().Be(TournamentStatus.Finished);
 
         tournament.UndoMatch(final.Id);

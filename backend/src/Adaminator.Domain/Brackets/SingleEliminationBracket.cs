@@ -61,6 +61,7 @@ public static class SingleEliminationBracket
 
         var rounds = RoundCount(size);
         var format = tournament.DefaultMatchFormat;
+        var scoreType = tournament.DefaultScoreType;
         var matches = new List<Match>();
 
         // Bye recipients advance into these round-2 slots.
@@ -71,7 +72,7 @@ public static class SingleEliminationBracket
             var (a, b) = pairings[k];
             if (a is not null && b is not null)
             {
-                matches.Add(Match.Create(tournament.Id, BracketSegment.Winner, 1, k, a, b, format));
+                matches.Add(Match.Create(tournament.Id, BracketSegment.Winner, 1, k, a, b, format, scoreType));
                 continue;
             }
 
@@ -104,13 +105,13 @@ public static class SingleEliminationBracket
                     b = pre.Slot1;
                 }
 
-                matches.Add(Match.Create(tournament.Id, BracketSegment.Winner, r, m, a, b, format));
+                matches.Add(Match.Create(tournament.Id, BracketSegment.Winner, r, m, a, b, format, scoreType));
             }
         }
 
         if (tournament.ThirdPlaceEnabled && HasTwoSemifinals(rounds, matches))
         {
-            matches.Add(Match.Create(tournament.Id, BracketSegment.ThirdPlace, rounds, 0, null, null, format));
+            matches.Add(Match.Create(tournament.Id, BracketSegment.ThirdPlace, rounds, 0, null, null, format, scoreType));
         }
 
         return matches;

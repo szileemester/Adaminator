@@ -11,7 +11,7 @@ public class ParticipantManagementTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
 
     private static Tournament NewTournament() =>
-        Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, MatchFormat.Bo1, false, CreatedAt);
+        Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt);
 
     [Fact]
     public void Can_add_and_list_participants()

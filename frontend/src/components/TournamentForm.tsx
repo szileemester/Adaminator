@@ -10,8 +10,8 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
-import type { MatchFormat, TournamentInput, TournamentType } from '../api/types';
-import { matchFormatLabels, tournamentTypeLabels } from '../api/types';
+import type { MatchFormat, ScoreType, TournamentInput, TournamentType } from '../api/types';
+import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(200, 'Name is too long'),
@@ -20,6 +20,7 @@ const schema = z.object({
   type: z.enum(['SingleElimination', 'DoubleElimination', 'RoundRobin']),
   defaultMatchFormat: z.enum(['Bo1', 'Bo3', 'Bo5', 'Bo7']),
   thirdPlaceEnabled: z.boolean(),
+  defaultScoreType: z.enum(['WinnerOnly', 'Games', 'Points', 'Sets']),
 });
 
 export type TournamentFormValues = z.infer<typeof schema>;
@@ -28,6 +29,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const matchFormats: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
 const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination', 'RoundRobin'];
+const scoreTypes: ScoreType[] = ['Games', 'Sets', 'Points', 'WinnerOnly'];
 
 interface TournamentFormProps {
   initialValues?: Partial<TournamentFormValues>;
@@ -60,12 +62,16 @@ export function TournamentForm({
       type: 'SingleElimination',
       defaultMatchFormat: 'Bo3',
       thirdPlaceEnabled: false,
+      defaultScoreType: 'Games',
       ...initialValues,
     },
   });
 
   const selectedType = watch('type');
   const isSingleElimination = selectedType === 'SingleElimination';
+  const selectedFormat = watch('defaultMatchFormat');
+  const selectedScoreType = watch('defaultScoreType');
+  const isBo1 = selectedFormat === 'Bo1';
 
   // Third Place Match is Single-Elimination only; clear it when switching away from it.
   useEffect(() => {
@@ -73,6 +79,13 @@ export function TournamentForm({
       setValue('thirdPlaceEnabled', false);
     }
   }, [isSingleElimination, setValue]);
+
+  // Winner Only scoring is valid only for BO1; fall back to Games when switching away from it.
+  useEffect(() => {
+    if (!isBo1 && selectedScoreType === 'WinnerOnly') {
+      setValue('defaultScoreType', 'Games');
+    }
+  }, [isBo1, selectedScoreType, setValue]);
 
   const submit = handleSubmit((values) => {
     onSubmit({
@@ -82,6 +95,7 @@ export function TournamentForm({
       type: values.type,
       defaultMatchFormat: values.defaultMatchFormat,
       thirdPlaceEnabled: values.type === 'SingleElimination' && values.thirdPlaceEnabled,
+      defaultScoreType: values.defaultMatchFormat !== 'Bo1' && values.defaultScoreType === 'WinnerOnly' ? 'Games' : values.defaultScoreType,
     });
   });
 
@@ -94,25 +108,6 @@ export function TournamentForm({
           {...register('name')}
           error={Boolean(errors.name)}
           helperText={errors.name?.message}
-        />
-
-        <TextField
-          label="Date"
-          type="date"
-          required
-          slotProps={{ inputLabel: { shrink: true } }}
-          {...register('date')}
-          error={Boolean(errors.date)}
-          helperText={errors.date?.message}
-        />
-
-        <TextField
-          label="Notes"
-          multiline
-          minRows={3}
-          {...register('notes')}
-          error={Boolean(errors.notes)}
-          helperText={errors.notes?.message}
         />
 
         <Controller
@@ -144,6 +139,20 @@ export function TournamentForm({
         />
 
         <Controller
+          name="defaultScoreType"
+          control={control}
+          render={({ field }) => (
+            <TextField select label="Default score type" {...field}>
+              {scoreTypes.map((type) => (
+                <MenuItem key={type} value={type} disabled={type === 'WinnerOnly' && !isBo1}>
+                  {scoreTypeLabels[type]}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
+        />
+
+        <Controller
           name="thirdPlaceEnabled"
           control={control}
           render={({ field }) => (
@@ -152,6 +161,25 @@ export function TournamentForm({
               label="Third place match (Single Elimination only)"
             />
           )}
+        />
+
+        <TextField
+          label="Date"
+          type="date"
+          required
+          slotProps={{ inputLabel: { shrink: true } }}
+          {...register('date')}
+          error={Boolean(errors.date)}
+          helperText={errors.date?.message}
+        />
+
+        <TextField
+          label="Notes"
+          multiline
+          minRows={3}
+          {...register('notes')}
+          error={Boolean(errors.notes)}
+          helperText={errors.notes?.message}
         />
 
         <Stack direction="row" spacing={2}>

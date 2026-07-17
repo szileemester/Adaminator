@@ -39,6 +39,11 @@ public class Match
     public MatchStatus Status { get; private set; }
     public Guid? WinnerId { get; private set; }
 
+    public bool IsDecided => Status is MatchStatus.Completed or MatchStatus.Forfeit;
+
+    /// <summary>The losing participant, once decided; null otherwise.</summary>
+    public Guid? LoserId => WinnerId is null ? null : (WinnerId == ParticipantAId ? ParticipantBId : ParticipantAId);
+
     public ScoreType? ScoreType { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
 
@@ -68,7 +73,8 @@ public class Match
         int indexInRound,
         Guid? participantAId,
         Guid? participantBId,
-        MatchFormat matchFormat) => new()
+        MatchFormat matchFormat,
+        ScoreType scoreType) => new()
     {
         Id = Guid.NewGuid(),
         TournamentId = tournamentId,
@@ -78,6 +84,7 @@ public class Match
         ParticipantAId = participantAId,
         ParticipantBId = participantBId,
         MatchFormat = matchFormat,
+        ScoreType = scoreType,
         Status = MatchStatus.Pending,
         WinnerId = null
     };

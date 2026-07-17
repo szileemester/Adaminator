@@ -211,6 +211,8 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                           label={nameA}
                           value={entry.scoreA ?? ''}
                           sx={{ width: 90 }}
+                          slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
                             const scoreA = e.target.value === '' ? null : Number(e.target.value);
                             const { scoreB } = entry;
@@ -226,6 +228,8 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                           label={nameB}
                           value={entry.scoreB ?? ''}
                           sx={{ width: 90 }}
+                          slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
                             const scoreB = e.target.value === '' ? null : Number(e.target.value);
                             const { scoreA } = entry;

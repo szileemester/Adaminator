@@ -17,10 +17,15 @@ public class CreateTournamentRequestValidator : AbstractValidator<CreateTourname
 
         RuleFor(x => x.Type).IsInEnum();
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
+        RuleFor(x => x.DefaultScoreType).IsInEnum();
 
         RuleFor(x => x.ThirdPlaceEnabled)
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
             .WithMessage("Third place match is available only for Single Elimination tournaments.");
+
+        RuleFor(x => x.DefaultScoreType)
+            .Must((request, scoreType) => !(scoreType == ScoreType.WinnerOnly && request.DefaultMatchFormat != MatchFormat.Bo1))
+            .WithMessage("Winner Only scoring is valid only for BO1 matches.");
     }
 }
 
@@ -37,9 +42,14 @@ public class UpdateTournamentRequestValidator : AbstractValidator<UpdateTourname
 
         RuleFor(x => x.Type).IsInEnum();
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
+        RuleFor(x => x.DefaultScoreType).IsInEnum();
 
         RuleFor(x => x.ThirdPlaceEnabled)
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
             .WithMessage("Third place match is available only for Single Elimination tournaments.");
+
+        RuleFor(x => x.DefaultScoreType)
+            .Must((request, scoreType) => !(scoreType == ScoreType.WinnerOnly && request.DefaultMatchFormat != MatchFormat.Bo1))
+            .WithMessage("Winner Only scoring is valid only for BO1 matches.");
     }
 }

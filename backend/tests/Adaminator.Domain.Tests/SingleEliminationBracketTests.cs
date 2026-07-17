@@ -12,7 +12,7 @@ public class SingleEliminationBracketTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
 
     private static Tournament NewTournament(bool thirdPlace = false) =>
-        Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, MatchFormat.Bo3, thirdPlace, CreatedAt);
+        Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, MatchFormat.Bo3, ScoreType.Games, thirdPlace, CreatedAt);
 
     private static Tournament Seeded(int participantCount, bool thirdPlace = false)
     {
@@ -59,6 +59,22 @@ public class SingleEliminationBracketTests
         tournament.Matches.Count(m => m.Segment == BracketSegment.Winner)
             .Should().Be(participants - 1);
         tournament.Status.Should().Be(TournamentStatus.Running);
+    }
+
+    [Fact]
+    public void Start_seeds_every_match_with_the_tournament_default_score_type()
+    {
+        var tournament = Tournament.Create("Cup", Date, null, TournamentType.SingleElimination, MatchFormat.Bo3, ScoreType.Points, false, CreatedAt);
+        for (var i = 1; i <= 4; i++)
+        {
+            tournament.AddParticipant($"P{i}");
+        }
+
+        var ordered = tournament.Participants.Select(p => p.Id).ToList();
+        tournament.ApplySeeding(ordered, Array.Empty<Guid>());
+        tournament.Start();
+
+        tournament.Matches.Should().OnlyContain(m => m.ScoreType == ScoreType.Points);
     }
 
     [Fact]

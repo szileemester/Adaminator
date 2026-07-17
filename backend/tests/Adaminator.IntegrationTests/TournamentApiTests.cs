@@ -97,6 +97,66 @@ public class TournamentApiTests : IClassFixture<ApiFactory>
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    [Fact]
+    public async Task Default_score_type_round_trips_through_create_and_read()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var create = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = "Points Cup",
+            date = "2026-07-14",
+            type = "SingleElimination",
+            defaultMatchFormat = "Bo3",
+            thirdPlaceEnabled = false,
+            defaultScoreType = "Points"
+        });
+
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await create.Content.ReadFromJsonAsync<TournamentResponse>(JsonOptions);
+        created!.DefaultScoreType.Should().Be("Points");
+
+        var fetch = await client.GetFromJsonAsync<TournamentResponse>($"/api/tournaments/{created.Id}", JsonOptions);
+        fetch!.DefaultScoreType.Should().Be("Points");
+    }
+
+    [Fact]
+    public async Task Omitting_default_score_type_falls_back_to_games()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var create = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = "Legacy Client Cup",
+            date = "2026-07-14",
+            type = "SingleElimination",
+            defaultMatchFormat = "Bo3",
+            thirdPlaceEnabled = false
+        });
+
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await create.Content.ReadFromJsonAsync<TournamentResponse>(JsonOptions);
+        created!.DefaultScoreType.Should().Be("Games");
+    }
+
+    [Fact]
+    public async Task Winner_only_default_score_type_is_rejected_for_a_non_bo1_default_format()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var response = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = "Invalid Score Cup",
+            date = "2026-07-14",
+            type = "SingleElimination",
+            defaultMatchFormat = "Bo3",
+            thirdPlaceEnabled = false,
+            defaultScoreType = "WinnerOnly"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     private async Task<HttpClient> CreateAuthenticatedClientAsync()
     {
         var client = _factory.CreateClient();
@@ -109,7 +169,7 @@ public class TournamentApiTests : IClassFixture<ApiFactory>
         return client;
     }
 
-    private record TournamentResponse(Guid Id, string Status, bool ThirdPlaceEnabled, string PublicToken);
+    private record TournamentResponse(Guid Id, string Status, bool ThirdPlaceEnabled, string DefaultScoreType, string PublicToken);
 
     private record LoginResponseBody(string Token, DateTimeOffset ExpiresAt);
 }

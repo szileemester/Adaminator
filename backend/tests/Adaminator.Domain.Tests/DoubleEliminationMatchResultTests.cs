@@ -13,7 +13,7 @@ public class DoubleEliminationMatchResultTests
 
     private static Tournament StartedFourPlayer(MatchFormat format = MatchFormat.Bo3)
     {
-        var tournament = Tournament.Create("Cup", Date, null, TournamentType.DoubleElimination, format, thirdPlaceEnabled: false, CreatedAt);
+        var tournament = Tournament.Create("Cup", Date, null, TournamentType.DoubleElimination, format, ScoreType.Games, thirdPlaceEnabled: false, CreatedAt);
         for (var i = 1; i <= 4; i++)
         {
             tournament.AddParticipant($"P{i}");
@@ -119,6 +119,9 @@ public class DoubleEliminationMatchResultTests
 
         Complete(tournament, grandFinal, championId, Now);
 
+        tournament.Status.Should().Be(TournamentStatus.Running);
+        tournament.CanFinish.Should().BeTrue();
+        tournament.Finish();
         tournament.Status.Should().Be(TournamentStatus.Finished);
         grandFinal.WinnerId.Should().Be(championId);
         tournament.Matches.Count(m => m.Segment == BracketSegment.GrandFinal).Should().Be(1, "there is no Grand Final Reset");
@@ -218,6 +221,7 @@ public class DoubleEliminationMatchResultTests
 
         var grandFinal = GrandFinal(tournament);
         Complete(tournament, grandFinal, grandFinal.ParticipantAId!.Value, Now);
+        tournament.Finish();
         tournament.Status.Should().Be(TournamentStatus.Finished);
 
         tournament.UndoMatch(grandFinal.Id);

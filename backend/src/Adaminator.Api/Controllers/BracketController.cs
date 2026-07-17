@@ -46,4 +46,12 @@ public class BracketController : ControllerBase
         var tournament = await _service.StartAsync(tournamentId, cancellationToken);
         return Ok(tournament);
     }
+
+    /// <summary>Manually finishes a Running tournament; rejected until every deciding match is decided.</summary>
+    [HttpPost("finish")]
+    public async Task<ActionResult<TournamentDto>> Finish(Guid tournamentId, CancellationToken cancellationToken)
+    {
+        var tournament = await _service.FinishAsync(tournamentId, cancellationToken);
+        return Ok(tournament);
+    }
 }

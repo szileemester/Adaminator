@@ -13,7 +13,7 @@ public class RoundRobinMatchResultTests
 
     private static Tournament StartedThreePlayer()
     {
-        var tournament = Tournament.Create("League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, false, CreatedAt);
+        var tournament = Tournament.Create("League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt);
         for (var i = 1; i <= 3; i++)
         {
             tournament.AddParticipant($"P{i}");
@@ -34,7 +34,7 @@ public class RoundRobinMatchResultTests
     [Fact]
     public void Third_place_cannot_be_enabled_for_round_robin()
     {
-        var act = () => Tournament.Create("League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, thirdPlaceEnabled: true, CreatedAt);
+        var act = () => Tournament.Create("League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, ScoreType.Games, thirdPlaceEnabled: true, CreatedAt);
 
         act.Should().Throw<DomainException>().WithMessage("*Single Elimination*");
     }
@@ -59,23 +59,30 @@ public class RoundRobinMatchResultTests
     }
 
     [Fact]
-    public void Tournament_stays_running_until_every_match_is_decided()
+    public void Tournament_stays_running_until_finished_by_hand_even_once_every_match_is_decided()
     {
         var tournament = StartedThreePlayer();
         var matches = tournament.Matches.ToList();
 
         Complete(tournament, matches[0], matches[0].ParticipantAId!.Value, Now);
         tournament.Status.Should().Be(TournamentStatus.Running);
+        tournament.CanFinish.Should().BeFalse();
 
         Complete(tournament, matches[1], matches[1].ParticipantAId!.Value, Now);
         tournament.Status.Should().Be(TournamentStatus.Running);
+        tournament.CanFinish.Should().BeFalse();
 
         Complete(tournament, matches[2], matches[2].ParticipantAId!.Value, Now);
+        tournament.Status.Should().Be(TournamentStatus.Running);
+        tournament.CanFinish.Should().BeTrue();
+
+        tournament.Finish();
+
         tournament.Status.Should().Be(TournamentStatus.Finished);
     }
 
     [Fact]
-    public void Forfeit_counts_toward_finishing_the_tournament()
+    public void Forfeit_counts_toward_finish_eligibility()
     {
         var tournament = StartedThreePlayer();
         var matches = tournament.Matches.ToList();
@@ -84,6 +91,8 @@ public class RoundRobinMatchResultTests
         Complete(tournament, matches[1], matches[1].ParticipantAId!.Value, Now);
         Complete(tournament, matches[2], matches[2].ParticipantAId!.Value, Now);
 
+        tournament.CanFinish.Should().BeTrue();
+        tournament.Finish();
         tournament.Status.Should().Be(TournamentStatus.Finished);
     }
 
@@ -133,6 +142,7 @@ public class RoundRobinMatchResultTests
         Complete(tournament, matches[0], matches[0].ParticipantAId!.Value, Now);
         Complete(tournament, matches[1], matches[1].ParticipantAId!.Value, Now);
         Complete(tournament, matches[2], matches[2].ParticipantAId!.Value, Now);
+        tournament.Finish();
         tournament.Status.Should().Be(TournamentStatus.Finished);
 
         tournament.UndoMatch(matches[2].Id);

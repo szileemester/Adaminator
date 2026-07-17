@@ -80,6 +80,11 @@ export async function startTournament(tournamentId: string): Promise<Tournament>
   return data;
 }
 
+export async function finishTournament(tournamentId: string): Promise<Tournament> {
+  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/finish`);
+  return data;
+}
+
 export async function getBracket(tournamentId: string): Promise<Bracket> {
   const { data } = await apiClient.get(`/api/tournaments/${tournamentId}/bracket`);
   return data;

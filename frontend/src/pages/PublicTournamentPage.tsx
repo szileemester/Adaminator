@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Box, Card, CardContent, Chip, CircularProgress, Divider, Stack, Typography } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getPublicTournament } from '../api/tournaments';
-import { matchFormatLabels, tournamentTypeLabels } from '../api/types';
+import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
 import { StatusChip } from '../components/StatusChip';
 import { BracketView } from '../components/BracketView';
 import { extractErrorMessage } from '../api/client';
@@ -44,6 +44,7 @@ export function PublicTournamentPage() {
                   <PublicRow label="Date" value={data.date} />
                   <PublicRow label="Type" value={tournamentTypeLabels[data.type]} />
                   <PublicRow label="Default match format" value={matchFormatLabels[data.defaultMatchFormat]} />
+                  <PublicRow label="Default score type" value={scoreTypeLabels[data.defaultScoreType]} />
                   {data.notes?.trim() && <PublicRow label="Notes" value={data.notes} />}
                 </Stack>
               </Stack>

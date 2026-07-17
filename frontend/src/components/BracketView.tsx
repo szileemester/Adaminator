@@ -4,25 +4,72 @@ import {
   Chip,
   Paper,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   Typography,
 } from '@mui/material';
-import type { Bracket, BracketMatch, BracketRound, BracketSlot, StandingRow } from '../api/types';
+import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import type { Bracket, BracketMatch, BracketRound, BracketSlot, PlacementGroup, StandingRow } from '../api/types';
 import { MatchResultDialog } from './MatchResultDialog';
+
+const RANK_COLORS: Record<number, { trophy: string; bg: string }> = {
+  1: { trophy: '#FFD700', bg: 'rgba(255,215,0,0.15)' },
+  2: { trophy: '#C0C0C0', bg: 'rgba(192,192,192,0.15)' },
+  3: { trophy: '#CD7F32', bg: 'rgba(205,127,50,0.15)' },
+};
+
+function formatOrdinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) {
+    return `${n}th`;
+  }
+
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
+function formatRank(start: number, end: number): string {
+  return start === end ? formatOrdinal(start) : `${formatOrdinal(start)}-${formatOrdinal(end)}`;
+}
+
+function PlaceCell({ rankStart, rankEnd }: { rankStart: number; rankEnd: number }) {
+  const colors = RANK_COLORS[rankStart];
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+      {colors && <EmojiEventsIcon fontSize="small" sx={{ color: colors.trophy }} />}
+      <Typography variant="body2">{formatRank(rankStart, rankEnd)}</Typography>
+    </Stack>
+  );
+}
 
 const CARD_WIDTH = 220;
 const CARD_HEIGHT = 76;
 const ROUND_VGAP = 28;
 const CONNECTOR_WIDTH = 40;
 const CONNECTOR_COLOR = 'rgba(255,255,255,0.2)';
+const EXTRA_MATCH_GAP = 32; // space between the last round's card and the extra match's label
+const EXTRA_LABEL_HEIGHT = 28; // reserved height for the extra match's label row
 
 export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tournamentId?: string }) {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  // Defaults to the Leaderboard once the tournament is Finished, otherwise the Bracket - only at
+  // mount, so finishing the tournament while this is open doesn't yank the admin's current tab.
+  const [tab, setTab] = useState(() => (bracket.status === 'Finished' ? 1 : 0));
   const selectedMatch = tournamentId && selectedMatchId ? findMatch(bracket, selectedMatchId) : null;
   const onSelect = tournamentId ? setSelectedMatchId : undefined;
 
@@ -34,49 +81,52 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
     );
   }
 
+  const isRoundRobin = bracket.type === 'RoundRobin';
+
   return (
-    <Box sx={{ overflowX: 'auto', pb: 1 }}>
-      {bracket.type === 'DoubleElimination' ? (
-        <Stack spacing={4}>
-          <BracketSection label="Winner Bracket" rounds={bracket.winnerRounds} onSelect={onSelect} />
-          {bracket.loserRounds.length > 0 && (
-            <BracketSection label="Loser Bracket" rounds={bracket.loserRounds} onSelect={onSelect} />
-          )}
-          {bracket.grandFinal && (
-            <Stack spacing={1}>
-              <Typography variant="subtitle2" color="text.secondary">
-                Grand Final
-              </Typography>
-              <Stack direction="row" spacing={3} sx={{ alignItems: 'flex-start' }}>
-                <Box sx={{ width: CARD_WIDTH }}>
-                  <MatchCard match={bracket.grandFinal} onSelect={onSelect} />
-                </Box>
-                {bracket.thirdPlacePodium && (
-                  <Chip
-                    variant="outlined"
-                    label={`3rd place: ${bracket.thirdPlacePodium.name}`}
-                    sx={{ alignSelf: 'center' }}
-                  />
-                )}
-              </Stack>
+    <Box sx={{ pb: 1 }}>
+      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
+        <Tab label={isRoundRobin ? 'Schedule' : 'Bracket'} sx={{ minHeight: 36, py: 0 }} />
+        <Tab label="Leaderboard" sx={{ minHeight: 36, py: 0 }} />
+      </Tabs>
+
+      {tab === 0 ? (
+        <Box sx={{ overflowX: 'auto' }}>
+          {bracket.type === 'DoubleElimination' ? (
+            <Stack spacing={4}>
+              <BracketSection label="Winner Bracket" rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
+              {bracket.loserRounds.length > 0 && (
+                <BracketSection label="Loser Bracket" rounds={bracket.loserRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
+              )}
+              {bracket.grandFinal && (
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Grand Final
+                  </Typography>
+                  <Box sx={{ width: CARD_WIDTH }}>
+                    <MatchCard match={bracket.grandFinal} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
+                  </Box>
+                </Stack>
+              )}
             </Stack>
-          )}
-        </Stack>
-      ) : bracket.type === 'RoundRobin' ? (
-        <Stack spacing={3}>
-          <Box sx={{ overflowX: 'auto' }}>
+          ) : isRoundRobin ? (
             <Stack direction="row" spacing={3} sx={{ alignItems: 'stretch', minWidth: 'min-content' }}>
-              <RoundColumns rounds={bracket.winnerRounds} onSelect={onSelect} />
+              <RoundColumns rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
             </Stack>
-          </Box>
-          {bracket.standings.length > 0 && <StandingsTable standings={bracket.standings} />}
-        </Stack>
+          ) : (
+            <BracketTree
+              rounds={bracket.winnerRounds}
+              onSelect={onSelect}
+              hoveredId={hoveredId}
+              onHover={setHoveredId}
+              extraMatch={bracket.thirdPlace ? { label: 'Third Place Match', match: bracket.thirdPlace } : null}
+            />
+          )}
+        </Box>
+      ) : isRoundRobin ? (
+        <StandingsTable standings={bracket.standings} hoveredId={hoveredId} onHover={setHoveredId} />
       ) : (
-        <BracketTree
-          rounds={bracket.winnerRounds}
-          onSelect={onSelect}
-          extraMatch={bracket.thirdPlace ? { label: 'Third Place Match', match: bracket.thirdPlace } : null}
-        />
+        <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={setHoveredId} />
       )}
 
       {selectedMatch && tournamentId && (
@@ -95,10 +145,14 @@ function BracketSection({
   label,
   rounds,
   onSelect,
+  hoveredId,
+  onHover,
 }: {
   label: string;
   rounds: BracketRound[];
   onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
 }) {
   return (
     <Stack spacing={1}>
@@ -106,77 +160,116 @@ function BracketSection({
         {label}
       </Typography>
       <Box sx={{ overflowX: 'auto' }}>
-        <BracketTree rounds={rounds} onSelect={onSelect} />
+        <BracketTree rounds={rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
       </Box>
     </Stack>
   );
 }
 
-/** Maps a match index in a round of `fromCount` matches to the index it feeds into in a round of `toCount` matches. */
-function targetIndex(fromCount: number, toCount: number, i: number): number {
-  if (toCount <= 0) {
-    return 0;
+/**
+ * Per-round slot count (bracket positions at that round, whether or not a Match row exists there -
+ * a bye pairing or a Loser Bracket match collapsed by the bye cascade never gets one), derived by
+ * doubling backward from the final round's width of 1. Exact for Single/Double Elimination's Winner
+ * Bracket, which always strictly halves round to round; a safe over-estimate for the Loser
+ * Bracket's non-halving consolidation/drop-in rounds (extra unused space rather than the collisions
+ * an under-estimate would cause). Accounts for round numbers that skip entirely (every match at
+ * that round collapsed) via `2 ** (next - round)` rather than assuming adjacent array entries are
+ * always one round apart.
+ */
+function computeRoundWidths(rounds: BracketRound[]): Map<number, number> {
+  const widths = new Map<number, number>();
+  if (rounds.length === 0) {
+    return widths;
   }
 
-  if (fromCount === toCount * 2) {
-    return Math.floor(i / 2);
+  widths.set(rounds[rounds.length - 1].round, 1);
+  for (let i = rounds.length - 2; i >= 0; i--) {
+    const round = rounds[i].round;
+    const next = rounds[i + 1].round;
+    widths.set(round, (widths.get(next) ?? 1) * 2 ** (next - round));
   }
 
-  if (fromCount === toCount) {
-    return i;
-  }
-
-  return Math.min(toCount - 1, Math.floor((i * toCount) / fromCount));
+  return widths;
 }
 
 /**
- * Vertical center (px) of every match in every round, laid out so that a round's matches are
- * centered on the matches that feed into them - the classic bracket "elbow" shape. Round 1 is
- * evenly spaced; every later round's position is the average of the source matches mapped to it
- * via {@link targetIndex} (an exact halving for Single/Double Elimination's Winner Bracket; a
- * best-effort grouping for the Loser Bracket's non-halving consolidation/drop-in rounds).
+ * Vertical center (px) of every occupied slot in every round, keyed by each match's own
+ * `indexInRound` rather than its position within the round's match array - that array can be
+ * sparse (byes in round 1 never get a Match row, so a lone real match can be e.g. index 3 of 4
+ * while being the only entry in the array), and positioning by array position instead collapses
+ * distinct slots onto the same Y, hiding matches behind each other.
+ *
+ * Two passes: first the classic "clean" binary-tree layout (round 1 evenly spaced across the full
+ * slot width, every later round centered on the average of the two slots that feed it - slots 2i
+ * and 2i+1 - as if every slot were a real match). Then, working backward from the last round,
+ * whenever a slot's sibling has no real match (a bye that advanced with no Match row - as opposed to
+ * a genuine two-way merge), that slot's real match is leveled with the single slot it feeds instead
+ * of sitting at its own averaged-with-a-phantom-bye position, so a lone feeder draws a straight
+ * connector instead of an unnecessary vertical jog.
  */
-function computeTreeLayout(rounds: BracketRound[]): { positions: number[][]; totalHeight: number } {
-  const positions: number[][] = [];
-  let prev: number[] = [];
+function computeTreeLayout(rounds: BracketRound[]): { positions: Map<number, number>[]; totalHeight: number } {
+  const widths = computeRoundWidths(rounds);
+  const firstWidth = rounds.length > 0 ? (widths.get(rounds[0].round) ?? rounds[0].matches.length) : 0;
 
-  rounds.forEach((round, ri) => {
-    const count = round.matches.length;
-    if (ri === 0) {
-      prev = round.matches.map((_, i) => i * (CARD_HEIGHT + ROUND_VGAP) + CARD_HEIGHT / 2);
-    } else {
-      const sums = new Array(count).fill(0);
-      const counts = new Array(count).fill(0);
-      prev.forEach((y, i) => {
-        const j = targetIndex(prev.length, count, i);
-        sums[j] += y;
-        counts[j] += 1;
-      });
-      prev = sums.map((sum, j) => (counts[j] > 0 ? sum / counts[j] : CARD_HEIGHT / 2));
+  let slotY = Array.from({ length: firstWidth }, (_, i) => i * (CARD_HEIGHT + ROUND_VGAP) + CARD_HEIGHT / 2);
+  const roundY: number[][] = [slotY];
+
+  for (let ri = 1; ri < rounds.length; ri++) {
+    const width = widths.get(rounds[ri].round) ?? rounds[ri].matches.length;
+    const next: number[] = [];
+    for (let i = 0; i < width; i++) {
+      const a = slotY[2 * i];
+      const b = slotY[2 * i + 1];
+      next.push(a !== undefined && b !== undefined ? (a + b) / 2 : (a ?? b ?? CARD_HEIGHT / 2));
     }
 
-    positions.push(prev);
-  });
+    slotY = next;
+    roundY.push(slotY);
+  }
 
-  const firstRoundCount = rounds[0]?.matches.length ?? 0;
-  const totalHeight = Math.max(firstRoundCount * (CARD_HEIGHT + ROUND_VGAP) - ROUND_VGAP, CARD_HEIGHT);
+  const realSlots = rounds.map((round) => new Set(round.matches.map((m) => m.indexInRound)));
+  for (let ri = rounds.length - 2; ri >= 0; ri--) {
+    roundY[ri].forEach((_, i) => {
+      if (!realSlots[ri].has(i)) {
+        return;
+      }
+
+      const sibling = i % 2 === 0 ? i + 1 : i - 1;
+      if (!realSlots[ri].has(sibling)) {
+        roundY[ri][i] = roundY[ri + 1][Math.floor(i / 2)];
+      }
+    });
+  }
+
+  const positions = roundY.map((slots) => new Map(slots.map((y, i) => [i, y])));
+
+  const totalHeight = Math.max(firstWidth * (CARD_HEIGHT + ROUND_VGAP) - ROUND_VGAP, CARD_HEIGHT);
   return { positions, totalHeight };
 }
 
 function BracketTree({
   rounds,
   onSelect,
+  hoveredId,
+  onHover,
   extraMatch,
 }: {
   rounds: BracketRound[];
   onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
   extraMatch?: { label: string; match: BracketMatch } | null;
 }) {
   const { positions, totalHeight } = useMemo(() => computeTreeLayout(rounds), [rounds]);
 
-  const lastRoundY = positions[positions.length - 1]?.[0] ?? 0;
-  const extraTop = lastRoundY + CARD_HEIGHT / 2 + 56;
-  const containerHeight = extraMatch ? extraTop + CARD_HEIGHT + 16 : totalHeight;
+  // Anchor the extra match (Third Place) to the bottom edge of the last round's lowest card, not
+  // its center - using the center directly under-accounted for the card's own half-height and let
+  // the label overlap the Final's card.
+  const lastRoundYs = Array.from(positions[positions.length - 1]?.values() ?? []);
+  const lastRoundBottom = Math.max(0, ...lastRoundYs) + CARD_HEIGHT / 2;
+  const extraLabelTop = lastRoundBottom + EXTRA_MATCH_GAP;
+  const extraCardTop = extraLabelTop + EXTRA_LABEL_HEIGHT;
+  const containerHeight = extraMatch ? extraCardTop + CARD_HEIGHT + 16 : totalHeight;
 
   return (
     <Stack spacing={2} sx={{ minWidth: 'min-content' }}>
@@ -197,36 +290,30 @@ function BracketTree({
         {rounds.map((round, ri) => (
           <Stack key={round.round} direction="row" sx={{ alignItems: 'flex-start' }}>
             <Box sx={{ position: 'relative', width: CARD_WIDTH, height: containerHeight }}>
-              {round.matches.map((match, i) => (
-                <Box
-                  key={match.id}
-                  sx={{ position: 'absolute', top: positions[ri][i] - CARD_HEIGHT / 2, left: 0, width: CARD_WIDTH }}
-                >
-                  <MatchCard match={match} onSelect={onSelect} />
-                </Box>
-              ))}
+              {round.matches.map((match) => {
+                const y = positions[ri].get(match.indexInRound);
+                return y === undefined ? null : (
+                  <Box key={match.id} sx={{ position: 'absolute', top: y - CARD_HEIGHT / 2, left: 0, width: CARD_WIDTH }}>
+                    <MatchCard match={match} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+                  </Box>
+                );
+              })}
               {ri === rounds.length - 1 && extraMatch && (
                 <>
-                  <Box sx={{ position: 'absolute', top: extraTop - CARD_HEIGHT / 2 - 32, left: 0, width: CARD_WIDTH }}>
+                  <Box sx={{ position: 'absolute', top: extraLabelTop, left: 0, width: CARD_WIDTH }}>
                     <Typography variant="subtitle2" color="text.secondary" sx={{ textAlign: 'center' }}>
                       {extraMatch.label}
                     </Typography>
                   </Box>
-                  <Box sx={{ position: 'absolute', top: extraTop - CARD_HEIGHT / 2, left: 0, width: CARD_WIDTH }}>
-                    <MatchCard match={extraMatch.match} onSelect={onSelect} />
+                  <Box sx={{ position: 'absolute', top: extraCardTop, left: 0, width: CARD_WIDTH }}>
+                    <MatchCard match={extraMatch.match} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
                   </Box>
                 </>
               )}
             </Box>
 
             {ri < rounds.length - 1 && (
-              <Connector
-                height={containerHeight}
-                from={positions[ri]}
-                to={positions[ri + 1]}
-                fromCount={round.matches.length}
-                toCount={rounds[ri + 1].matches.length}
-              />
+              <Connector height={containerHeight} matches={round.matches} fromPositions={positions[ri]} toPositions={positions[ri + 1]} />
             )}
           </Stack>
         ))}
@@ -237,26 +324,29 @@ function BracketTree({
 
 function Connector({
   height,
-  from,
-  to,
-  fromCount,
-  toCount,
+  matches,
+  fromPositions,
+  toPositions,
 }: {
   height: number;
-  from: number[];
-  to: number[];
-  fromCount: number;
-  toCount: number;
+  matches: BracketMatch[];
+  fromPositions: Map<number, number>;
+  toPositions: Map<number, number>;
 }) {
   const midX = CONNECTOR_WIDTH / 2;
 
   return (
     <Box component="svg" width={CONNECTOR_WIDTH} height={height} sx={{ display: 'block', flexShrink: 0 }}>
-      {from.map((y, i) => {
-        const targetY = to[targetIndex(fromCount, toCount, i)];
+      {matches.map((match) => {
+        const y = fromPositions.get(match.indexInRound);
+        const targetY = toPositions.get(Math.floor(match.indexInRound / 2));
+        if (y === undefined || targetY === undefined) {
+          return null;
+        }
+
         return (
           <path
-            key={i}
+            key={match.id}
             d={`M0 ${y} H${midX} V${targetY} H${CONNECTOR_WIDTH}`}
             fill="none"
             stroke={CONNECTOR_COLOR}
@@ -268,7 +358,17 @@ function Connector({
   );
 }
 
-function RoundColumns({ rounds, onSelect }: { rounds: BracketRound[]; onSelect?: (matchId: string) => void }) {
+function RoundColumns({
+  rounds,
+  onSelect,
+  hoveredId,
+  onHover,
+}: {
+  rounds: BracketRound[];
+  onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
   return (
     <>
       {rounds.map((round) => (
@@ -277,7 +377,7 @@ function RoundColumns({ rounds, onSelect }: { rounds: BracketRound[]; onSelect?:
             {round.title}
           </Typography>
           {round.matches.map((match) => (
-            <MatchCard key={match.id} match={match} onSelect={onSelect} />
+            <MatchCard key={match.id} match={match} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
           ))}
         </Stack>
       ))}
@@ -298,7 +398,17 @@ function findMatch(bracket: Bracket, matchId: string): BracketMatch | null {
   return bracket.thirdPlace?.id === matchId ? bracket.thirdPlace : null;
 }
 
-function MatchCard({ match, onSelect }: { match: BracketMatch; onSelect?: (matchId: string) => void }) {
+function MatchCard({
+  match,
+  onSelect,
+  hoveredId,
+  onHover,
+}: {
+  match: BracketMatch;
+  onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
   const actionable = Boolean(onSelect) && match.participantA != null && match.participantB != null;
   return (
     <Paper
@@ -313,9 +423,9 @@ function MatchCard({ match, onSelect }: { match: BracketMatch; onSelect?: (match
       }}
       onClick={actionable ? () => onSelect!(match.id) : undefined}
     >
-      <SlotRow slot={match.participantA} winnerId={match.winnerId} />
+      <SlotRow slot={match.participantA} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} />
       <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
-      <SlotRow slot={match.participantB} winnerId={match.winnerId} />
+      <SlotRow slot={match.participantB} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} />
       {match.status === 'Forfeit' && (
         <Chip
           size="small"
@@ -328,10 +438,23 @@ function MatchCard({ match, onSelect }: { match: BracketMatch; onSelect?: (match
   );
 }
 
-function SlotRow({ slot, winnerId }: { slot: BracketSlot | null; winnerId: string | null }) {
+function SlotRow({
+  slot,
+  winnerId,
+  hoveredId,
+  onHover,
+}: {
+  slot: BracketSlot | null;
+  winnerId: string | null;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
   const isWinner = slot != null && winnerId === slot.participantId;
+  const isHovered = slot != null && slot.participantId === hoveredId;
   return (
     <Box
+      onMouseEnter={slot ? () => onHover(slot.participantId) : undefined}
+      onMouseLeave={slot ? () => onHover(null) : undefined}
       sx={{
         px: 1.5,
         flex: 1,
@@ -342,6 +465,7 @@ function SlotRow({ slot, winnerId }: { slot: BracketSlot | null; winnerId: strin
         overflow: 'hidden',
         gap: 1,
         bgcolor: isWinner ? 'rgba(63,185,80,0.15)' : 'transparent',
+        boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
       }}
     >
       <Typography
@@ -349,7 +473,7 @@ function SlotRow({ slot, winnerId }: { slot: BracketSlot | null; winnerId: strin
         noWrap
         sx={{
           color: slot ? 'text.primary' : 'text.disabled',
-          fontWeight: isWinner ? 700 : 400,
+          fontWeight: isWinner || isHovered ? 700 : 400,
         }}
       >
         {slot ? slot.name : 'TBD'}
@@ -359,7 +483,15 @@ function SlotRow({ slot, winnerId }: { slot: BracketSlot | null; winnerId: strin
   );
 }
 
-function StandingsTable({ standings }: { standings: StandingRow[] }) {
+function StandingsTable({
+  standings,
+  hoveredId,
+  onHover,
+}: {
+  standings: StandingRow[];
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2" color="text.secondary">
@@ -369,7 +501,7 @@ function StandingsTable({ standings }: { standings: StandingRow[] }) {
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell>#</TableCell>
+              <TableCell>Place</TableCell>
               <TableCell>Name</TableCell>
               <TableCell align="right">Played</TableCell>
               <TableCell align="right">Wins</TableCell>
@@ -377,18 +509,97 @@ function StandingsTable({ standings }: { standings: StandingRow[] }) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {standings.map((row) => (
-              <TableRow key={row.participantId}>
-                <TableCell>{row.rank}</TableCell>
-                <TableCell>{row.name}</TableCell>
-                <TableCell align="right">{row.played}</TableCell>
-                <TableCell align="right">{row.wins}</TableCell>
-                <TableCell align="right">{row.losses}</TableCell>
-              </TableRow>
-            ))}
+            {standings.map((row) => {
+              const colors = RANK_COLORS[row.rank];
+              const isHovered = row.participantId === hoveredId;
+              return (
+                <TableRow
+                  key={row.participantId}
+                  onMouseEnter={() => onHover(row.participantId)}
+                  onMouseLeave={() => onHover(null)}
+                  sx={{
+                    bgcolor: colors?.bg ?? 'transparent',
+                    boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
+                  }}
+                >
+                  <TableCell>
+                    <PlaceCell rankStart={row.rank} rankEnd={row.rank} />
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: isHovered ? 700 : 400 }}>{row.name}</TableCell>
+                  <TableCell align="right">{row.played}</TableCell>
+                  <TableCell align="right">{row.wins}</TableCell>
+                  <TableCell align="right">{row.losses}</TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
     </Stack>
+  );
+}
+
+function PlacementsList({
+  placements,
+  hoveredId,
+  onHover,
+}: {
+  placements: PlacementGroup[];
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
+  if (placements.length === 0) {
+    return (
+      <Typography color="text.secondary">
+        Placements will appear here as participants are eliminated.
+      </Typography>
+    );
+  }
+
+  return (
+    <TableContainer component={Paper} variant="outlined" sx={{ maxWidth: 480 }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Place</TableCell>
+            <TableCell>Name</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {placements.map((group) => {
+            const colors = RANK_COLORS[group.rankStart];
+            return (
+              <TableRow key={group.label} sx={{ bgcolor: colors?.bg ?? 'transparent' }}>
+                <TableCell sx={{ verticalAlign: 'top' }}>
+                  <PlaceCell rankStart={group.rankStart} rankEnd={group.rankEnd} />
+                </TableCell>
+                <TableCell>
+                  <Stack spacing={0.5}>
+                    {group.participants.map((participant) => {
+                      const isHovered = participant.participantId === hoveredId;
+                      return (
+                        <Box
+                          key={participant.participantId}
+                          onMouseEnter={() => onHover(participant.participantId)}
+                          onMouseLeave={() => onHover(null)}
+                          sx={{
+                            borderRadius: 1,
+                            boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ fontWeight: isHovered ? 700 : 400 }}>
+                            {participant.name}
+                          </Typography>
+                        </Box>
+                      );
+                    })}
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }

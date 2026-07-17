@@ -15,7 +15,7 @@ public class DoubleEliminationBracketTests
     private static readonly BracketMatchRef GF = new(BracketSegment.GrandFinal, 1, 0);
 
     private static Tournament NewTournament() =>
-        Tournament.Create("Cup", Date, null, TournamentType.DoubleElimination, MatchFormat.Bo3, thirdPlaceEnabled: false, CreatedAt);
+        Tournament.Create("Cup", Date, null, TournamentType.DoubleElimination, MatchFormat.Bo3, ScoreType.Games, thirdPlaceEnabled: false, CreatedAt);
 
     private static Tournament Seeded(int participantCount)
     {

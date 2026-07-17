@@ -26,6 +26,15 @@ public record BracketRoundDto(int Round, string Title, IReadOnlyList<BracketMatc
 /// <summary>Round Robin only: a participant's ranked won-loss record, sorted wins desc, losses asc, name asc.</summary>
 public record StandingRowDto(int Rank, Guid ParticipantId, string Name, int Played, int Wins, int Losses);
 
+/// <summary>
+/// Single/Double Elimination only: one rung of the final-placements leaderboard - "Champion",
+/// "Runner-up", "3rd Place", or "Eliminated in {round}" for everyone else. RankStart/RankEnd reflect
+/// the group's fixed bracket position (e.g. semifinal losers always occupy 3-4) even before that
+/// round is fully decided; RankStart != RankEnd means a tie (e.g. both semifinal losers when there's
+/// no Third Place match).
+/// </summary>
+public record PlacementGroupDto(int RankStart, int RankEnd, string Label, IReadOnlyList<BracketSlotDto> Participants);
+
 public record BracketDto(
     TournamentType Type,
     TournamentStatus Status,
@@ -34,4 +43,6 @@ public record BracketDto(
     BracketMatchDto? GrandFinal,
     BracketMatchDto? ThirdPlace,
     BracketSlotDto? ThirdPlacePodium,
-    IReadOnlyList<StandingRowDto> Standings);
+    IReadOnlyList<StandingRowDto> Standings,
+    IReadOnlyList<PlacementGroupDto> Placements,
+    bool CanFinish);

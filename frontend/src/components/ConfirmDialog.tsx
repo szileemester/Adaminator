@@ -12,7 +12,7 @@ interface ConfirmDialogProps {
   title: string;
   message: string;
   confirmLabel?: string;
-  confirmColor?: 'primary' | 'error';
+  confirmColor?: 'primary' | 'error' | 'success';
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
