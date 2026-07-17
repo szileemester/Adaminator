@@ -149,9 +149,12 @@ public class Tournament
             throw new DomainException("Bye selection is invalid.");
         }
 
-        var requiredByes = Type == TournamentType.DoubleElimination
-            ? DoubleEliminationBracket.ComputeRequiredByes(_participants.Count)
-            : SingleEliminationBracket.ComputeRequiredByes(_participants.Count);
+        var requiredByes = Type switch
+        {
+            TournamentType.DoubleElimination => DoubleEliminationBracket.ComputeRequiredByes(_participants.Count),
+            TournamentType.RoundRobin => RoundRobinBracket.ComputeRequiredByes(_participants.Count),
+            _ => SingleEliminationBracket.ComputeRequiredByes(_participants.Count)
+        };
         if (byeSet.Count != requiredByes)
         {
             throw new DomainException($"Exactly {requiredByes} bye(s) must be selected; {byeSet.Count} chosen.");
@@ -180,9 +183,12 @@ public class Tournament
         }
 
         // BuildMatches re-validates the bye count against the bracket size.
-        var matches = Type == TournamentType.DoubleElimination
-            ? DoubleEliminationBracket.BuildMatches(this)
-            : SingleEliminationBracket.BuildMatches(this);
+        var matches = Type switch
+        {
+            TournamentType.DoubleElimination => DoubleEliminationBracket.BuildMatches(this),
+            TournamentType.RoundRobin => RoundRobinBracket.BuildMatches(this),
+            _ => SingleEliminationBracket.BuildMatches(this)
+        };
         _matches.AddRange(matches);
         Status = TournamentStatus.Running;
     }
@@ -253,6 +259,12 @@ public class Tournament
             return false;
         }
 
+        if (Type == TournamentType.RoundRobin)
+        {
+            // Round Robin matches have no dependents; the latest-decided check above is sufficient.
+            return true;
+        }
+
         if (Type == TournamentType.DoubleElimination)
         {
             var (winnerRouteMatch, _, loserRouteMatch, _) = FindUndoDependentsDoubleElimination(match);
@@ -294,8 +306,9 @@ public class Tournament
             winnerRouteMatch?.ClearSlot(winnerRouteSlotA, winnerId);
             loserRouteMatch?.ClearSlot(loserRouteSlotA, loserId);
         }
-        else
+        else if (Type != TournamentType.RoundRobin)
         {
+            // Round Robin matches have no dependents to clear.
             var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
 
             if (IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch))
@@ -320,6 +333,12 @@ public class Tournament
         if (Type == TournamentType.DoubleElimination)
         {
             AdvanceDoubleElimination(match);
+            return;
+        }
+
+        if (Type == TournamentType.RoundRobin)
+        {
+            // Round Robin matches never feed into another match.
             return;
         }
 
@@ -371,6 +390,16 @@ public class Tournament
         {
             var grandFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
             if (grandFinal is not null && IsDecided(grandFinal))
+            {
+                Status = TournamentStatus.Finished;
+            }
+
+            return;
+        }
+
+        if (Type == TournamentType.RoundRobin)
+        {
+            if (_matches.All(IsDecided))
             {
                 Status = TournamentStatus.Finished;
             }
@@ -495,7 +524,7 @@ public class Tournament
             throw new DomainException($"Tournament notes must be at most {NotesMaxLength} characters.");
         }
 
-        if (type == TournamentType.DoubleElimination && thirdPlaceEnabled)
+        if (type != TournamentType.SingleElimination && thirdPlaceEnabled)
         {
             throw new DomainException("Third place match is available only for Single Elimination tournaments.");
         }

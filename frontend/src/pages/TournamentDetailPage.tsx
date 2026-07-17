@@ -8,13 +8,13 @@ import {
   Card,
   CardContent,
   CircularProgress,
-  Divider,
   IconButton,
   Snackbar,
   Stack,
   Tooltip,
   Typography,
 } from '@mui/material';
+import type { SxProps, Theme } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -104,36 +104,17 @@ export function TournamentDetailPage() {
           <Typography variant="h6" gutterBottom>
             Overview
           </Typography>
-          <Stack spacing={1.5} divider={<Divider flexItem />}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, columnGap: 4, rowGap: 1.5 }}>
             <DetailRow label="Date" value={tournament.date} />
             <DetailRow label="Type" value={tournamentTypeLabels[tournament.type]} />
             <DetailRow label="Default match format" value={matchFormatLabels[tournament.defaultMatchFormat]} />
             <DetailRow label="Third place match" value={tournament.thirdPlaceEnabled ? 'Enabled' : 'Disabled'} />
-            <DetailRow label="Notes" value={tournament.notes?.trim() ? tournament.notes : '—'} />
-          </Stack>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Public view
-          </Typography>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-            <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-              {publicUrl}
-            </Typography>
-            <Tooltip title="Copy link">
-              <IconButton size="small" onClick={copyPublicLink}>
-                <ContentCopyIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Open">
-              <IconButton size="small" component={RouterLink} to={`/public/${tournament.publicToken}`} target="_blank">
-                <OpenInNewIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Stack>
+            <DetailRow
+              label="Notes"
+              value={tournament.notes?.trim() ? tournament.notes : '—'}
+              sx={{ gridColumn: { xs: '1', sm: '1 / -1' } }}
+            />
+          </Box>
         </CardContent>
       </Card>
 
@@ -157,6 +138,27 @@ export function TournamentDetailPage() {
         </Card>
       )}
 
+      <Stack
+        direction="row"
+        spacing={1}
+        sx={{ alignItems: 'center', flexWrap: 'wrap', color: 'text.secondary' }}
+      >
+        <Typography variant="caption">Public view:</Typography>
+        <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>
+          {publicUrl}
+        </Typography>
+        <Tooltip title="Copy link">
+          <IconButton size="small" onClick={copyPublicLink}>
+            <ContentCopyIcon fontSize="inherit" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Open">
+          <IconButton size="small" component={RouterLink} to={`/public/${tournament.publicToken}`} target="_blank">
+            <OpenInNewIcon fontSize="inherit" />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+
       <ConfirmDialog
         open={confirmOpen}
         title="Delete tournament"
@@ -178,9 +180,9 @@ export function TournamentDetailPage() {
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value, sx }: { label: string; value: string; sx?: SxProps<Theme> }) {
   return (
-    <Stack direction="row" spacing={2}>
+    <Stack direction="row" spacing={2} sx={sx}>
       <Typography variant="body2" color="text.secondary" sx={{ minWidth: 180 }}>
         {label}
       </Typography>

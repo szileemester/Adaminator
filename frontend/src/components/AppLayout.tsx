@@ -15,7 +15,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <Box sx={{ minHeight: '100vh' }}>
-      <AppBar position="static" color="transparent" elevation={0} sx={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+      <AppBar
+        position="sticky"
+        color="transparent"
+        elevation={0}
+        sx={{
+          top: 0,
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          bgcolor: 'rgba(14,17,23,0.85)',
+          backdropFilter: 'blur(8px)',
+        }}
+      >
         <Toolbar>
           <EmojiEventsIcon sx={{ mr: 1, color: 'primary.main' }} />
           <Typography

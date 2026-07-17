@@ -17,6 +17,11 @@ internal static class BracketProjection
             return BuildDoubleElimination(tournament, names);
         }
 
+        if (tournament.Type == TournamentType.RoundRobin)
+        {
+            return BuildRoundRobin(tournament, names);
+        }
+
         var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
         var totalRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
         var rounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), names, tournament);
@@ -30,7 +35,59 @@ internal static class BracketProjection
             LoserRounds: Array.Empty<BracketRoundDto>(),
             GrandFinal: null,
             ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, names, tournament),
-            ThirdPlacePodium: null);
+            ThirdPlacePodium: null,
+            Standings: Array.Empty<StandingRowDto>());
+    }
+
+    /// <summary>
+    /// Round Robin has no advancement, so its "bracket" is just a flat list of rounds - reusing
+    /// <see cref="BracketDto.WinnerRounds"/> rather than adding a parallel field. Ranking comes from
+    /// <see cref="BuildStandings"/> instead of a Final/Third-Place match.
+    /// </summary>
+    private static BracketDto BuildRoundRobin(Tournament tournament, IReadOnlyDictionary<Guid, string> names)
+    {
+        var matches = SegmentMatches(tournament, BracketSegment.RoundRobin);
+        var rounds = GroupIntoRounds(matches, PlainRoundTitle, names, tournament);
+
+        return new BracketDto(
+            tournament.Type,
+            tournament.Status,
+            WinnerRounds: rounds,
+            LoserRounds: Array.Empty<BracketRoundDto>(),
+            GrandFinal: null,
+            ThirdPlace: null,
+            ThirdPlacePodium: null,
+            Standings: BuildStandings(matches, names));
+    }
+
+    /// <summary>
+    /// Ranks participants by decided Round Robin matches. Ties are broken by fewer losses, then by
+    /// name for a fully deterministic order - the spec defines no head-to-head tiebreaker.
+    /// </summary>
+    private static IReadOnlyList<StandingRowDto> BuildStandings(List<Match> matches, IReadOnlyDictionary<Guid, string> names)
+    {
+        var wins = new Dictionary<Guid, int>();
+        var losses = new Dictionary<Guid, int>();
+
+        foreach (var match in matches)
+        {
+            if (match.WinnerId is not { } winnerId || match.ParticipantAId is not { } a || match.ParticipantBId is not { } b)
+            {
+                continue;
+            }
+
+            var loserId = winnerId == a ? b : a;
+            wins[winnerId] = wins.GetValueOrDefault(winnerId) + 1;
+            losses[loserId] = losses.GetValueOrDefault(loserId) + 1;
+        }
+
+        return names
+            .Select(kvp => (Id: kvp.Key, Name: kvp.Value, Wins: wins.GetValueOrDefault(kvp.Key), Losses: losses.GetValueOrDefault(kvp.Key)))
+            .OrderByDescending(p => p.Wins)
+            .ThenBy(p => p.Losses)
+            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .Select((p, i) => new StandingRowDto(i + 1, p.Id, p.Name, p.Wins + p.Losses, p.Wins, p.Losses))
+            .ToList();
     }
 
     /// <summary>
@@ -46,7 +103,7 @@ internal static class BracketProjection
         var winnerRounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalWinnerRounds), names, tournament);
 
         var loserMatches = SegmentMatches(tournament, BracketSegment.Loser);
-        var loserRounds = GroupIntoRounds(loserMatches, g => $"Round {g}", names, tournament);
+        var loserRounds = GroupIntoRounds(loserMatches, PlainRoundTitle, names, tournament);
 
         var grandFinal = tournament.Matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
         var thirdPlacePodium = ToSlot(tournament.ThirdPlaceParticipantId, names);
@@ -58,7 +115,8 @@ internal static class BracketProjection
             loserRounds,
             grandFinal is null ? null : ToMatchDto(grandFinal, names, tournament),
             ThirdPlace: null,
-            thirdPlacePodium);
+            thirdPlacePodium,
+            Standings: Array.Empty<StandingRowDto>());
     }
 
     private static List<Match> SegmentMatches(Tournament tournament, BracketSegment segment) =>
@@ -109,6 +167,9 @@ internal static class BracketProjection
 
     private static BracketSlotDto? ToSlot(Guid? participantId, IReadOnlyDictionary<Guid, string> names) =>
         participantId is null ? null : new BracketSlotDto(participantId.Value, names.GetValueOrDefault(participantId.Value, "?"));
+
+    /// <summary>Plain "Round N" title, used where rounds never get a Final/Semifinals-style name (Round Robin, the Loser Bracket).</summary>
+    private static string PlainRoundTitle(int round) => $"Round {round}";
 
     private static string RoundTitle(int round, int totalRounds)
     {

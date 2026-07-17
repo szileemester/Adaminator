@@ -19,7 +19,7 @@ public class CreateTournamentRequestValidator : AbstractValidator<CreateTourname
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
 
         RuleFor(x => x.ThirdPlaceEnabled)
-            .Must((request, thirdPlace) => !(request.Type == TournamentType.DoubleElimination && thirdPlace))
+            .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
             .WithMessage("Third place match is available only for Single Elimination tournaments.");
     }
 }
@@ -39,7 +39,7 @@ public class UpdateTournamentRequestValidator : AbstractValidator<UpdateTourname
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
 
         RuleFor(x => x.ThirdPlaceEnabled)
-            .Must((request, thirdPlace) => !(request.Type == TournamentType.DoubleElimination && thirdPlace))
+            .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
             .WithMessage("Third place match is available only for Single Elimination tournaments.");
     }
 }

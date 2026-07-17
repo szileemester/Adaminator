@@ -25,9 +25,12 @@ public class BracketService
             .OrderBy(_ => Random.Shared.Next())
             .ToList();
 
-        var requiredByes = tournament.Type == TournamentType.DoubleElimination
-            ? DoubleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count)
-            : SingleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count);
+        var requiredByes = tournament.Type switch
+        {
+            TournamentType.DoubleElimination => DoubleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count),
+            TournamentType.RoundRobin => RoundRobinBracket.ComputeRequiredByes(tournament.Participants.Count),
+            _ => SingleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count)
+        };
         var defaultByes = shuffled.Take(requiredByes).ToList();
 
         tournament.ApplySeeding(shuffled, defaultByes);

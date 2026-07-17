@@ -1,4 +1,4 @@
-export type TournamentType = 'SingleElimination' | 'DoubleElimination';
+export type TournamentType = 'SingleElimination' | 'DoubleElimination' | 'RoundRobin';
 export type MatchFormat = 'Bo1' | 'Bo3' | 'Bo5' | 'Bo7';
 export type TournamentStatus = 'Planned' | 'Running' | 'Finished';
 
@@ -25,7 +25,7 @@ export interface Tournament {
 }
 
 export type MatchStatus = 'Pending' | 'InProgress' | 'Completed' | 'Forfeit';
-export type BracketSegment = 'Winner' | 'Loser' | 'GrandFinal' | 'ThirdPlace';
+export type BracketSegment = 'Winner' | 'Loser' | 'GrandFinal' | 'ThirdPlace' | 'RoundRobin';
 
 export interface Participant {
   id: string;
@@ -72,18 +72,30 @@ export interface BracketRound {
   matches: BracketMatch[];
 }
 
+export interface StandingRow {
+  rank: number;
+  participantId: string;
+  name: string;
+  played: number;
+  wins: number;
+  losses: number;
+}
+
 export interface Bracket {
   type: TournamentType;
   status: TournamentStatus;
+  /** Round Robin: the flat round-by-round schedule (no advancement between rounds). */
   winnerRounds: BracketRound[];
-  /** Double Elimination only; empty for Single Elimination. */
+  /** Double Elimination only; empty for Single Elimination and Round Robin. */
   loserRounds: BracketRound[];
-  /** Double Elimination only; null for Single Elimination. */
+  /** Double Elimination only; null for Single Elimination and Round Robin. */
   grandFinal: BracketMatch | null;
-  /** Single Elimination only: a real match. Null for Double Elimination (see thirdPlacePodium). */
+  /** Single Elimination only: a real match. Null for Double Elimination (see thirdPlacePodium) and Round Robin. */
   thirdPlace: BracketMatch | null;
   /** Double Elimination only: derived from the Loser Bracket Final's result - there is no separate match. */
   thirdPlacePodium: BracketSlot | null;
+  /** Round Robin only: participants ranked by win-loss record; empty for other tournament types. */
+  standings: StandingRow[];
 }
 
 export interface PublicTournament {
@@ -99,17 +111,20 @@ export interface PublicTournament {
 
 /**
  * Smallest power of two >= n (the bracket size). Double Elimination has no 2-slot topology, so it
- * floors at 4 (mirrors DoubleEliminationBracket.ComputeBracketSize on the backend).
+ * floors at 4 (mirrors DoubleEliminationBracket.ComputeBracketSize on the backend). Round Robin has
+ * no bracket padding at all - its "size" is just the participant count.
  */
 export function bracketSize(participantCount: number, type: TournamentType = 'SingleElimination'): number {
   if (participantCount < 2) return 0;
+  if (type === 'RoundRobin') return participantCount;
   let size = 1;
   while (size < participantCount) size <<= 1;
   return type === 'DoubleElimination' ? Math.max(4, size) : size;
 }
 
-/** Number of first-round byes required for the given participant count. */
+/** Number of first-round byes required for the given participant count. Round Robin never has admin-chosen byes. */
 export function requiredByes(participantCount: number, type: TournamentType = 'SingleElimination'): number {
+  if (type === 'RoundRobin') return 0;
   return participantCount < 2 ? 0 : bracketSize(participantCount, type) - participantCount;
 }
 
@@ -125,6 +140,7 @@ export interface TournamentInput {
 export const tournamentTypeLabels: Record<TournamentType, string> = {
   SingleElimination: 'Single Elimination',
   DoubleElimination: 'Double Elimination',
+  RoundRobin: 'Round Robin',
 };
 
 export const matchFormatLabels: Record<MatchFormat, string> = {

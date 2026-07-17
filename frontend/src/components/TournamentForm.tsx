@@ -17,7 +17,7 @@ const schema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(200, 'Name is too long'),
   date: z.string().min(1, 'Date is required'),
   notes: z.string().max(2000, 'Notes are too long').optional(),
-  type: z.enum(['SingleElimination', 'DoubleElimination']),
+  type: z.enum(['SingleElimination', 'DoubleElimination', 'RoundRobin']),
   defaultMatchFormat: z.enum(['Bo1', 'Bo3', 'Bo5', 'Bo7']),
   thirdPlaceEnabled: z.boolean(),
 });
@@ -27,7 +27,7 @@ export type TournamentFormValues = z.infer<typeof schema>;
 const today = () => new Date().toISOString().slice(0, 10);
 
 const matchFormats: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
-const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination'];
+const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination', 'RoundRobin'];
 
 interface TournamentFormProps {
   initialValues?: Partial<TournamentFormValues>;
@@ -65,14 +65,14 @@ export function TournamentForm({
   });
 
   const selectedType = watch('type');
-  const isDoubleElimination = selectedType === 'DoubleElimination';
+  const isSingleElimination = selectedType === 'SingleElimination';
 
-  // Third Place Match is Single-Elimination only; clear it when switching to Double Elimination.
+  // Third Place Match is Single-Elimination only; clear it when switching away from it.
   useEffect(() => {
-    if (isDoubleElimination) {
+    if (!isSingleElimination) {
       setValue('thirdPlaceEnabled', false);
     }
-  }, [isDoubleElimination, setValue]);
+  }, [isSingleElimination, setValue]);
 
   const submit = handleSubmit((values) => {
     onSubmit({
@@ -148,7 +148,7 @@ export function TournamentForm({
           control={control}
           render={({ field }) => (
             <FormControlLabel
-              control={<Checkbox checked={field.value} onChange={field.onChange} disabled={isDoubleElimination} />}
+              control={<Checkbox checked={field.value} onChange={field.onChange} disabled={!isSingleElimination} />}
               label="Third place match (Single Elimination only)"
             />
           )}

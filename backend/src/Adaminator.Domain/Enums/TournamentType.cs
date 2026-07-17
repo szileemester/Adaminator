@@ -6,5 +6,6 @@ namespace Adaminator.Domain.Enums;
 public enum TournamentType
 {
     SingleElimination = 0,
-    DoubleElimination = 1
+    DoubleElimination = 1,
+    RoundRobin = 2
 }
