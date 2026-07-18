@@ -155,7 +155,14 @@ function PlayoffBrackets({
     <Stack spacing={4}>
       <BracketSection label="Winner Bracket" rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
       {bracket.loserRounds.length > 0 && (
-        <BracketSection label="Loser Bracket" rounds={bracket.loserRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+        <BracketSection
+          label="Loser Bracket"
+          rounds={bracket.loserRounds}
+          onSelect={onSelect}
+          hoveredId={hoveredId}
+          onHover={onHover}
+          roundsAlwaysHalve={false}
+        />
       )}
       {bracket.grandFinal && (
         <Stack spacing={1}>
@@ -236,12 +243,14 @@ function BracketSection({
   onSelect,
   hoveredId,
   onHover,
+  roundsAlwaysHalve,
 }: {
   label: string;
   rounds: BracketRound[];
   onSelect?: (matchId: string) => void;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
+  roundsAlwaysHalve?: boolean;
 }) {
   return (
     <Stack spacing={1}>
@@ -249,91 +258,144 @@ function BracketSection({
         {label}
       </Typography>
       <Box sx={{ overflowX: 'auto' }}>
-        <BracketTree rounds={rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+        <BracketTree
+          rounds={rounds}
+          onSelect={onSelect}
+          hoveredId={hoveredId}
+          onHover={onHover}
+          roundsAlwaysHalve={roundsAlwaysHalve}
+        />
       </Box>
     </Stack>
   );
 }
 
 /**
- * Per-round slot count (bracket positions at that round, whether or not a Match row exists there -
- * a bye pairing or a Loser Bracket match collapsed by the bye cascade never gets one), derived by
- * doubling backward from the final round's width of 1. Exact for Single/Double Elimination's Winner
- * Bracket, which always strictly halves round to round; a safe over-estimate for the Loser
- * Bracket's non-halving consolidation/drop-in rounds (extra unused space rather than the collisions
- * an under-estimate would cause). Accounts for round numbers that skip entirely (every match at
- * that round collapsed) via `2 ** (next - round)` rather than assuming adjacent array entries are
- * always one round apart.
+ * The slot that slot `slot` of a round `fromWidth` wide feeds in the next round, `toWidth` wide:
+ * a halving round merges slots 2j/2j+1 into j, while a loser bracket's drop-in round is 1:1 (its
+ * other feeder is a Winner Bracket dropout, which has no card in this bracket). The proportional
+ * fallback only catches irregular widths a bye cascade can leave behind.
  */
-function computeRoundWidths(rounds: BracketRound[]): Map<number, number> {
+function targetIndex(fromWidth: number, toWidth: number, slot: number): number {
+  if (toWidth <= 0) {
+    return 0;
+  }
+
+  if (fromWidth === toWidth * 2) {
+    return Math.floor(slot / 2);
+  }
+
+  if (fromWidth === toWidth) {
+    return slot;
+  }
+
+  return Math.min(toWidth - 1, Math.floor((slot * toWidth) / fromWidth));
+}
+
+/** Highest slot actually occupied in a round; matches carry their real `indexInRound`, which can be sparse. */
+function occupiedWidth(round: BracketRound): number {
+  return round.matches.reduce((max, match) => Math.max(max, match.indexInRound + 1), 0);
+}
+
+/**
+ * Per-round slot count (bracket positions at that round, whether or not a Match row exists there -
+ * a bye pairing never gets one).
+ *
+ * A **winner** bracket (and Single Elimination) strictly halves every round, so its widths come from
+ * doubling backward off the final round's width of 1 - exact even when byes leave round 1's match
+ * array sparse, and tolerant of a round number skipping entirely via `2 ** (next - round)`.
+ *
+ * A **loser** bracket does not halve: it alternates "drop-in" rounds (same match count - each Loser
+ * Bracket survivor meets an incoming Winner Bracket dropout) with consolidation rounds (halving).
+ * Doubling backward there over-estimates the early rounds several times over and drags the later
+ * ones out of alignment, so those widths are taken from the rounds' own occupied slots instead,
+ * never narrower than the round they feed.
+ */
+function computeRoundWidths(rounds: BracketRound[], roundsAlwaysHalve: boolean): Map<number, number> {
   const widths = new Map<number, number>();
   if (rounds.length === 0) {
     return widths;
   }
 
-  widths.set(rounds[rounds.length - 1].round, 1);
+  const last = rounds[rounds.length - 1];
+  widths.set(last.round, roundsAlwaysHalve ? 1 : Math.max(1, occupiedWidth(last)));
+
   for (let i = rounds.length - 2; i >= 0; i--) {
     const round = rounds[i].round;
-    const next = rounds[i + 1].round;
-    widths.set(round, (widths.get(next) ?? 1) * 2 ** (next - round));
+    const nextWidth = widths.get(rounds[i + 1].round) ?? 1;
+    widths.set(
+      round,
+      roundsAlwaysHalve
+        ? nextWidth * 2 ** (rounds[i + 1].round - round)
+        : Math.max(occupiedWidth(rounds[i]), nextWidth),
+    );
   }
 
   return widths;
 }
 
 /**
- * Vertical center (px) of every occupied slot in every round, keyed by each match's own
- * `indexInRound` rather than its position within the round's match array - that array can be
- * sparse (byes in round 1 never get a Match row, so a lone real match can be e.g. index 3 of 4
- * while being the only entry in the array), and positioning by array position instead collapses
- * distinct slots onto the same Y, hiding matches behind each other.
+ * Vertical center (px) of every slot in every round, keyed by each match's own `indexInRound` rather
+ * than its position within the round's match array - that array can be sparse (byes in round 1 never
+ * get a Match row, so a lone real match can be e.g. index 3 of 4 while being the only entry), and
+ * positioning by array position instead collapses distinct slots onto the same Y.
  *
- * Two passes: first the classic "clean" binary-tree layout (round 1 evenly spaced across the full
- * slot width, every later round centered on the average of the two slots that feed it - slots 2i
- * and 2i+1 - as if every slot were a real match). Then, working backward from the last round,
- * whenever a slot's sibling has no real match (a bye that advanced with no Match row - as opposed to
- * a genuine two-way merge), that slot's real match is leveled with the single slot it feeds instead
- * of sitting at its own averaged-with-a-phantom-bye position, so a lone feeder draws a straight
- * connector instead of an unnecessary vertical jog.
+ * Two passes. First the clean tree layout: round 1 evenly spaced across its full slot width, then
+ * every later slot centered on the average of the slots feeding it (via {@link targetIndex}, which
+ * handles both a halving round and a loser bracket's 1:1 drop-in round). Then, working backward from
+ * the last round, any slot that is the *sole* real feeder of its target is leveled with that target -
+ * so a lone feeder (its sibling being a bye that advanced with no Match row, or a drop-in round where
+ * one feeder is a Winner Bracket dropout rather than a card) draws a straight connector instead of an
+ * unnecessary vertical jog.
  */
-function computeTreeLayout(rounds: BracketRound[]): { positions: Map<number, number>[]; totalHeight: number } {
-  const widths = computeRoundWidths(rounds);
-  const firstWidth = rounds.length > 0 ? (widths.get(rounds[0].round) ?? rounds[0].matches.length) : 0;
+function computeTreeLayout(
+  rounds: BracketRound[],
+  roundsAlwaysHalve: boolean,
+): { positions: Map<number, number>[]; widths: number[]; totalHeight: number } {
+  const widthMap = computeRoundWidths(rounds, roundsAlwaysHalve);
+  const widths = rounds.map((round) => widthMap.get(round.round) ?? Math.max(1, occupiedWidth(round)));
 
+  const firstWidth = widths[0] ?? 0;
   let slotY = Array.from({ length: firstWidth }, (_, i) => i * (CARD_HEIGHT + ROUND_VGAP) + CARD_HEIGHT / 2);
   const roundY: number[][] = [slotY];
 
   for (let ri = 1; ri < rounds.length; ri++) {
-    const width = widths.get(rounds[ri].round) ?? rounds[ri].matches.length;
-    const next: number[] = [];
-    for (let i = 0; i < width; i++) {
-      const a = slotY[2 * i];
-      const b = slotY[2 * i + 1];
-      next.push(a !== undefined && b !== undefined ? (a + b) / 2 : (a ?? b ?? CARD_HEIGHT / 2));
-    }
+    const sums = new Array<number>(widths[ri]).fill(0);
+    const counts = new Array<number>(widths[ri]).fill(0);
+    slotY.forEach((y, slot) => {
+      const target = targetIndex(widths[ri - 1], widths[ri], slot);
+      sums[target] += y;
+      counts[target] += 1;
+    });
 
-    slotY = next;
+    slotY = sums.map((sum, j) => (counts[j] > 0 ? sum / counts[j] : CARD_HEIGHT / 2));
     roundY.push(slotY);
   }
 
   const realSlots = rounds.map((round) => new Set(round.matches.map((m) => m.indexInRound)));
   for (let ri = rounds.length - 2; ri >= 0; ri--) {
-    roundY[ri].forEach((_, i) => {
-      if (!realSlots[ri].has(i)) {
-        return;
+    const feedersByTarget = new Map<number, number[]>();
+    for (const slot of realSlots[ri]) {
+      const target = targetIndex(widths[ri], widths[ri + 1], slot);
+      const feeders = feedersByTarget.get(target);
+      if (feeders) {
+        feeders.push(slot);
+      } else {
+        feedersByTarget.set(target, [slot]);
       }
+    }
 
-      const sibling = i % 2 === 0 ? i + 1 : i - 1;
-      if (!realSlots[ri].has(sibling)) {
-        roundY[ri][i] = roundY[ri + 1][Math.floor(i / 2)];
+    for (const [target, feeders] of feedersByTarget) {
+      if (feeders.length === 1 && roundY[ri + 1][target] !== undefined) {
+        roundY[ri][feeders[0]] = roundY[ri + 1][target];
       }
-    });
+    }
   }
 
   const positions = roundY.map((slots) => new Map(slots.map((y, i) => [i, y])));
 
   const totalHeight = Math.max(firstWidth * (CARD_HEIGHT + ROUND_VGAP) - ROUND_VGAP, CARD_HEIGHT);
-  return { positions, totalHeight };
+  return { positions, widths, totalHeight };
 }
 
 function BracketTree({
@@ -342,14 +404,20 @@ function BracketTree({
   hoveredId,
   onHover,
   extraMatch,
+  roundsAlwaysHalve = true,
 }: {
   rounds: BracketRound[];
   onSelect?: (matchId: string) => void;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
   extraMatch?: { label: string; match: BracketMatch } | null;
+  /** False for a loser bracket, whose drop-in rounds keep the same match count instead of halving. */
+  roundsAlwaysHalve?: boolean;
 }) {
-  const { positions, totalHeight } = useMemo(() => computeTreeLayout(rounds), [rounds]);
+  const { positions, widths, totalHeight } = useMemo(
+    () => computeTreeLayout(rounds, roundsAlwaysHalve),
+    [rounds, roundsAlwaysHalve],
+  );
 
   // Anchor the extra match (Third Place) to the bottom edge of the last round's lowest card, not
   // its center - using the center directly under-accounted for the card's own half-height and let
@@ -402,7 +470,14 @@ function BracketTree({
             </Box>
 
             {ri < rounds.length - 1 && (
-              <Connector height={containerHeight} matches={round.matches} fromPositions={positions[ri]} toPositions={positions[ri + 1]} />
+              <Connector
+                height={containerHeight}
+                matches={round.matches}
+                fromPositions={positions[ri]}
+                toPositions={positions[ri + 1]}
+                fromWidth={widths[ri]}
+                toWidth={widths[ri + 1]}
+              />
             )}
           </Stack>
         ))}
@@ -416,11 +491,15 @@ function Connector({
   matches,
   fromPositions,
   toPositions,
+  fromWidth,
+  toWidth,
 }: {
   height: number;
   matches: BracketMatch[];
   fromPositions: Map<number, number>;
   toPositions: Map<number, number>;
+  fromWidth: number;
+  toWidth: number;
 }) {
   const midX = CONNECTOR_WIDTH / 2;
 
@@ -428,7 +507,7 @@ function Connector({
     <Box component="svg" width={CONNECTOR_WIDTH} height={height} sx={{ display: 'block', flexShrink: 0 }}>
       {matches.map((match) => {
         const y = fromPositions.get(match.indexInRound);
-        const targetY = toPositions.get(Math.floor(match.indexInRound / 2));
+        const targetY = toPositions.get(targetIndex(fromWidth, toWidth, match.indexInRound));
         if (y === undefined || targetY === undefined) {
           return null;
         }
