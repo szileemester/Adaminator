@@ -57,10 +57,10 @@ function PlaceCell({ rankStart, rankEnd }: { rankStart: number; rankEnd: number 
   );
 }
 
-const CARD_WIDTH = 220;
+const CARD_WIDTH = 168;
 const CARD_HEIGHT = 76;
 const ROUND_VGAP = 28;
-const CONNECTOR_WIDTH = 40;
+const CONNECTOR_WIDTH = 32;
 const CONNECTOR_COLOR = 'rgba(255,255,255,0.2)';
 const EXTRA_MATCH_GAP = 32; // space between the last round's card and the extra match's label
 const EXTRA_LABEL_HEIGHT = 28; // reserved height for the extra match's label row

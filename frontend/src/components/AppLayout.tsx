@@ -43,7 +43,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           )}
         </Toolbar>
       </AppBar>
-      <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Container maxWidth="xl" sx={{ py: 4, px: { xs: 2, sm: 3 } }}>
         {children}
       </Container>
     </Box>

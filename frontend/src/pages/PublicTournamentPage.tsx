@@ -18,7 +18,7 @@ export function PublicTournamentPage() {
 
   return (
     <Box sx={{ minHeight: '100vh', p: { xs: 2, md: 4 } }}>
-      <Stack spacing={3} sx={{ maxWidth: 1000, mx: 'auto' }}>
+      <Stack spacing={3} sx={{ maxWidth: 1400, mx: 'auto' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <EmojiEventsIcon color="primary" />
           <Typography variant="h5">Adaminator</Typography>
