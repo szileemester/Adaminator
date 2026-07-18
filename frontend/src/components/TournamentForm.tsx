@@ -196,7 +196,6 @@ export function TournamentForm({
           {...register('date')}
           error={Boolean(errors.date)}
           helperText={errors.date?.message}
-          sx={{ gridColumn: '1 / -1' }}
         />
 
         <TextField
