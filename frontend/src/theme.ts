@@ -3,7 +3,11 @@ import { createTheme } from '@mui/material/styles';
 // Dark-by-default, bracket-focused palette (UI/UX guideline: clean and modern). Both schemes
 // share the same accent colors for brand consistency; only background/paper differ.
 export const theme = createTheme({
-  cssVariables: true,
+  // MUI defaults to colorSchemeSelector: 'media' whenever both a light and dark scheme are
+  // defined, which ties the active scheme to the OS's prefers-color-scheme *only* - manual
+  // setMode() calls (our toggle button) would then have no visual effect at all. 'class' makes
+  // the toggle actually switch the rendered scheme, independent of the OS setting.
+  cssVariables: { colorSchemeSelector: 'class' },
   defaultColorScheme: 'dark',
   colorSchemes: {
     dark: {
