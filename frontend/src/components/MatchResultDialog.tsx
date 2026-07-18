@@ -36,9 +36,59 @@ interface GameSlot {
 
 const blankSlot = (): GameSlot => ({ scoreA: null, scoreB: null, participantAWon: null });
 
-/** Winner implied by a game's scores once both are entered, otherwise whatever was already selected (e.g. by a toggle click). */
+/**
+ * Winner implied by a game's scores once both are entered, otherwise whatever was already selected
+ * (e.g. by a toggle click). A tie has no implied winner - it is not a valid final score (the backend
+ * rejects it, see Match.BuildEntries) - so it resolves to `null` rather than falling through to
+ * whatever the fallback happened to be.
+ */
 function deriveWinner(scoreA: number | null, scoreB: number | null, fallback: boolean | null): boolean | null {
-  return scoreA != null && scoreB != null ? scoreA > scoreB : fallback;
+  if (scoreA == null || scoreB == null) {
+    return fallback;
+  }
+  return scoreA === scoreB ? null : scoreA > scoreB;
+}
+
+/** Number(value) with a NaN guard: a syntactically incomplete number (e.g. a lone "-") is treated as "not entered" rather than a phantom score. */
+function parseScore(value: string): number | null {
+  if (value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+interface GameProgress {
+  /** How many leading slots are validly played (a tied Points score does not count - see isFilled). */
+  filledCount: number;
+  played: GameSlot[];
+  playedWinsA: number;
+  playedWinsB: number;
+  isDecisive: boolean;
+  /** One panel enabled at a time: the played ones, plus exactly one more to play next - unless the match is already decided, in which case no further panel is needed. */
+  enabledCount: number;
+}
+
+function computeGameProgress(entries: GameSlot[], scoreType: ScoreType | null, required: number, maxGames: number): GameProgress {
+  const isFilled = (slot: GameSlot) =>
+    scoreType === 'Points'
+      ? slot.scoreA != null && slot.scoreB != null && slot.scoreA !== slot.scoreB
+      : slot.participantAWon != null;
+
+  // Slots are filled strictly in order, so the first not-yet-filled slot is the one boundary that
+  // matters - everything before it is played, everything from it onward isn't reachable yet.
+  let filledCount = 0;
+  while (filledCount < entries.length && isFilled(entries[filledCount])) {
+    filledCount++;
+  }
+
+  const played = entries.slice(0, filledCount);
+  const playedWinsA = played.filter((e) => e.participantAWon === true).length;
+  const playedWinsB = filledCount - playedWinsA;
+  const isDecisive = playedWinsA >= required || playedWinsB >= required;
+  const enabledCount = isDecisive ? filledCount : Math.min(filledCount + 1, maxGames);
+
+  return { filledCount, played, playedWinsA, playedWinsB, isDecisive, enabledCount };
 }
 
 interface MatchResultDialogProps {
@@ -69,24 +119,12 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
 
   const maxGames = matchFormatGameCount(matchFormat);
   const required = requiredWins(matchFormat);
-
-  const isFilled = (slot: GameSlot) =>
-    scoreType === 'Points' ? slot.scoreA != null && slot.scoreB != null : slot.participantAWon != null;
-
-  // Slots are filled strictly in order, so the first not-yet-filled slot is the one boundary that
-  // matters - everything before it is played, everything from it onward isn't reachable yet.
-  let filledCount = 0;
-  while (filledCount < entries.length && isFilled(entries[filledCount])) {
-    filledCount++;
-  }
-
-  const played = entries.slice(0, filledCount);
-  const playedWinsA = played.filter((e) => e.participantAWon === true).length;
-  const playedWinsB = filledCount - playedWinsA;
-  const isDecisive = playedWinsA >= required || playedWinsB >= required;
-  // One panel enabled at a time: the played ones, plus exactly one more to play next - unless the
-  // match is already decided, in which case no further panel is needed.
-  const enabledCount = isDecisive ? filledCount : Math.min(filledCount + 1, maxGames);
+  const { filledCount, played, playedWinsA, playedWinsB, isDecisive, enabledCount } = computeGameProgress(
+    entries,
+    scoreType,
+    required,
+    maxGames,
+  );
 
   const invalidateBracket = () => queryClient.invalidateQueries({ queryKey: ['bracket', tournamentId] });
 
@@ -211,6 +249,15 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                       // beyond the new count; a growing one needs no action, since slice() is a no-op
                       // when the array is already shorter than the new maxGames.
                       setEntries((prev) => prev.slice(0, matchFormatGameCount(format)));
+                      // Winner Only is only valid for Bo1 (enforced below by disabling that MenuItem,
+                      // and server-side by Match.BuildEntries) - leaving it selected after moving to a
+                      // longer format would let the admin keep entering results under a combination
+                      // that only fails once they hit Save. Safe to clear here: every other score type
+                      // shares the same "participantAWon set" definition of a played game, so already
+                      // recorded results stay counted as played once a new type is chosen.
+                      if (format !== 'Bo1' && scoreType === 'WinnerOnly') {
+                        setScoreType(null);
+                      }
                       setDirty(true);
                     }}
                   >
@@ -230,6 +277,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                     label="Score type"
                     displayEmpty
                     value={scoreType ?? ''}
+                    disabled={filledCount > 0}
                     onChange={(e) => {
                       setScoreType(e.target.value as ScoreType);
                       setDirty(true);
@@ -246,6 +294,20 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                   </Select>
                 </FormControl>
               </Stack>
+
+              {/*
+                Switching score type re-evaluates every recorded game against the new type's
+                definition of "played" (e.g. Points requires numeric scores the other types never
+                collected), so an already-recorded game would stop counting as played - and if the
+                admin then hits Save, the now-shorter entries list would overwrite the match's saved
+                results. Locking the selector once a game exists rules this out entirely rather than
+                only warning about it after the fact.
+              */}
+              {filledCount > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  Score type is locked once a game has been recorded.
+                </Typography>
+              )}
 
               {scoreType == null ? (
                 <Typography variant="body2" color="text.secondary">
@@ -272,7 +334,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                               slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
                               onFocus={(e) => e.target.select()}
                               onChange={(e) => {
-                                const scoreA = e.target.value === '' ? null : Number(e.target.value);
+                                const scoreA = parseScore(e.target.value);
                                 updateEntry(index, { scoreA, participantAWon: deriveWinner(scoreA, slot.scoreB, slot.participantAWon) });
                               }}
                             />
@@ -286,7 +348,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                               slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
                               onFocus={(e) => e.target.select()}
                               onChange={(e) => {
-                                const scoreB = e.target.value === '' ? null : Number(e.target.value);
+                                const scoreB = parseScore(e.target.value);
                                 updateEntry(index, { scoreB, participantAWon: deriveWinner(slot.scoreA, scoreB, slot.participantAWon) });
                               }}
                             />
