@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
+import type { ComponentProps } from 'react';
 import {
   Box,
   Chip,
@@ -69,8 +70,7 @@ const ROUND_VGAP = 28;
 const CONNECTOR_WIDTH = 32;
 const CONNECTOR_COLOR = 'rgba(255,255,255,0.2)';
 const EXTRA_MATCH_GAP = 32; // space between the last round's card and the extra match's label
-const EXTRA_LABEL_HEIGHT = 28; // reserved height for the extra match's label row
-const SECTION_HEADER_HEIGHT = 28; // reserved height for a playoff grid round-header row
+const LABEL_ROW_HEIGHT = 28; // reserved height for one subtitle2 label row (a round header, or the extra match's label)
 const SECTION_GAP = 48; // vertical space between the winner and loser bracket regions
 
 export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tournamentId?: string }) {
@@ -150,9 +150,14 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
 /**
  * Column a winner-bracket round occupies in the shared playoff grid. A loser round L sits in column
  * L; a winner round sits in the column of the loser round its losers drop into (rounds 1-2 map
- * straight across, later ones to 2r-2, mirroring the backend topology). That is what makes the
- * winner bracket skip columns, so its Final lines up with the Loser Bracket Final and the two feed a
- * Grand Final in the column after them.
+ * straight across, later ones to 2r-2). That is what makes the winner bracket skip columns, so its
+ * Final lines up with the Loser Bracket Final and the two feed a Grand Final in the column after them.
+ *
+ * This formula re-derives DoubleEliminationBracket.GenerateTopology's round-to-drop-in mapping
+ * (backend/src/Adaminator.Domain/Brackets/DoubleEliminationBracket.cs) rather than reading it off the
+ * data, because BracketRound carries no such field today. If that topology's drop-in schedule ever
+ * changes, this silently mis-draws rather than failing loudly - keep the two in sync by hand, or add
+ * an explicit column/drop-round field to the bracket DTO if this drifts again.
  */
 function winnerColumn(round: number): number {
   return round <= 2 ? round : 2 * round - 2;
@@ -188,80 +193,86 @@ function PlayoffGrid({
   const winnerLayout = useMemo(() => computeTreeLayout(winnerRounds, true), [winnerRounds]);
   const loserLayout = useMemo(() => computeTreeLayout(loserRounds, false), [loserRounds]);
 
-  const winnerTop = SECTION_HEADER_HEIGHT;
-  const winnerBottom = winnerTop + (winnerRounds.length > 0 ? winnerLayout.totalHeight : 0);
-  const loserHeaderTop = winnerBottom + SECTION_GAP;
-  const loserTop = loserHeaderTop + SECTION_HEADER_HEIGHT;
-  const height = loserRounds.length > 0 ? loserTop + loserLayout.totalHeight : winnerBottom;
+  // Pure geometry off the two layouts above - independent of hoveredId, so this must not re-run on
+  // every hover (only cards.map(...) below reads hoveredId, once this array exists).
+  const { width, height, cards, headers, paths } = useMemo(() => {
+    const winnerTop = LABEL_ROW_HEIGHT;
+    const winnerBottom = winnerTop + (winnerRounds.length > 0 ? winnerLayout.totalHeight : 0);
+    const loserHeaderTop = winnerBottom + SECTION_GAP;
+    const loserTop = loserHeaderTop + LABEL_ROW_HEIGHT;
+    const height = loserRounds.length > 0 ? loserTop + loserLayout.totalHeight : winnerBottom;
 
-  const columnX = (column: number) => (column - 1) * (CARD_WIDTH + CONNECTOR_WIDTH);
-  const winnerColumns = winnerRounds.map((round) => winnerColumn(round.round));
-  const loserColumns = loserRounds.map((round) => round.round);
-  const lastColumn = Math.max(1, ...winnerColumns, ...loserColumns);
-  const grandFinalColumn = lastColumn + 1;
-  const width = columnX(grandFinal ? grandFinalColumn : lastColumn) + CARD_WIDTH;
+    const columnX = (column: number) => (column - 1) * (CARD_WIDTH + CONNECTOR_WIDTH);
+    const winnerColumns = winnerRounds.map((round) => winnerColumn(round.round));
+    const loserColumns = loserRounds.map((round) => round.round);
+    const lastColumn = Math.max(1, ...winnerColumns, ...loserColumns);
+    const grandFinalColumn = lastColumn + 1;
+    const width = columnX(grandFinal ? grandFinalColumn : lastColumn) + CARD_WIDTH;
 
-  const cards: { match: BracketMatch; x: number; y: number }[] = [];
-  const headers: { key: string; title: string; x: number; top: number }[] = [];
-  const paths: string[] = [];
+    const cards: { match: BracketMatch; x: number; y: number }[] = [];
+    const headers: { key: string; title: string; x: number; top: number }[] = [];
+    const paths: string[] = [];
 
-  // One bracket's cards, its round headers, and the connectors into its next round.
-  const place = (
-    rounds: BracketRound[],
-    layout: ReturnType<typeof computeTreeLayout>,
-    columns: number[],
-    top: number,
-    headerTop: number,
-    titlePrefix: string,
-  ) => {
-    rounds.forEach((round, ri) => {
-      const x = columnX(columns[ri]);
-      headers.push({ key: `${titlePrefix}-${round.round}`, title: `${titlePrefix} ${round.title}`, x, top: headerTop });
+    // One bracket's cards, its round headers, and the connectors into its next round.
+    const place = (
+      rounds: BracketRound[],
+      layout: ReturnType<typeof computeTreeLayout>,
+      columns: number[],
+      top: number,
+      headerTop: number,
+      titlePrefix: string,
+    ) => {
+      rounds.forEach((round, ri) => {
+        const x = columnX(columns[ri]);
+        headers.push({ key: `${titlePrefix}-${round.round}`, title: `${titlePrefix} ${round.title}`, x, top: headerTop });
 
-      round.matches.forEach((match) => {
-        const y = layout.positions[ri]?.get(match.indexInRound);
-        if (y === undefined) {
-          return;
-        }
-
-        cards.push({ match, x, y: top + y });
-
-        if (ri < rounds.length - 1) {
-          const target = targetIndex(layout.widths[ri], layout.widths[ri + 1], match.indexInRound);
-          const targetY = layout.positions[ri + 1]?.get(target);
-          if (targetY !== undefined) {
-            paths.push(elbowPath(x + CARD_WIDTH, top + y, columnX(columns[ri + 1]), top + targetY));
+        round.matches.forEach((match) => {
+          const y = layout.positions[ri]?.get(match.indexInRound);
+          if (y === undefined) {
+            return;
           }
-        }
+
+          cards.push({ match, x, y: top + y });
+
+          if (ri < rounds.length - 1) {
+            const target = targetIndex(layout.widths[ri], layout.widths[ri + 1], match.indexInRound);
+            const targetY = layout.positions[ri + 1]?.get(target);
+            if (targetY !== undefined) {
+              paths.push(elbowPath(x + CARD_WIDTH, top + y, columnX(columns[ri + 1]), top + targetY));
+            }
+          }
+        });
       });
-    });
-  };
+    };
 
-  place(winnerRounds, winnerLayout, winnerColumns, winnerTop, 0, 'Upper');
-  place(loserRounds, loserLayout, loserColumns, loserTop, loserHeaderTop, 'Lower');
+    place(winnerRounds, winnerLayout, winnerColumns, winnerTop, 0, 'Upper');
+    place(loserRounds, loserLayout, loserColumns, loserTop, loserHeaderTop, 'Lower');
 
-  // The Grand Final sits between the two finals that feed it.
-  const finalOf = (rounds: BracketRound[], layout: ReturnType<typeof computeTreeLayout>, top: number, columns: number[]) => {
-    const ri = rounds.length - 1;
-    const match = rounds[ri]?.matches[0];
-    const y = match ? layout.positions[ri]?.get(match.indexInRound) : undefined;
-    return y === undefined ? null : { x: columnX(columns[ri]), y: top + y };
-  };
+    // The Grand Final sits between the two finals that feed it.
+    const finalOf = (rounds: BracketRound[], layout: ReturnType<typeof computeTreeLayout>, top: number, columns: number[]) => {
+      const ri = rounds.length - 1;
+      const match = rounds[ri]?.matches[0];
+      const y = match ? layout.positions[ri]?.get(match.indexInRound) : undefined;
+      return y === undefined ? null : { x: columnX(columns[ri]), y: top + y };
+    };
 
-  if (grandFinal) {
-    const winnerFinal = finalOf(winnerRounds, winnerLayout, winnerTop, winnerColumns);
-    const loserFinal = finalOf(loserRounds, loserLayout, loserTop, loserColumns);
-    const x = columnX(grandFinalColumn);
-    const y = winnerFinal && loserFinal ? (winnerFinal.y + loserFinal.y) / 2 : (winnerFinal ?? loserFinal)?.y ?? CARD_HEIGHT / 2;
+    if (grandFinal) {
+      const winnerFinal = finalOf(winnerRounds, winnerLayout, winnerTop, winnerColumns);
+      const loserFinal = finalOf(loserRounds, loserLayout, loserTop, loserColumns);
+      const x = columnX(grandFinalColumn);
+      const y = winnerFinal && loserFinal ? (winnerFinal.y + loserFinal.y) / 2 : (winnerFinal ?? loserFinal)?.y ?? CARD_HEIGHT / 2;
 
-    headers.push({ key: 'grand-final', title: 'Grand Final', x, top: 0 });
-    cards.push({ match: grandFinal, x, y });
-    for (const source of [winnerFinal, loserFinal]) {
-      if (source) {
-        paths.push(elbowPath(source.x + CARD_WIDTH, source.y, x, y));
+      headers.push({ key: 'grand-final', title: 'Grand Final', x, top: 0 });
+      cards.push({ match: grandFinal, x, y });
+      for (const source of [winnerFinal, loserFinal]) {
+        if (source) {
+          paths.push(elbowPath(source.x + CARD_WIDTH, source.y, x, y));
+        }
       }
     }
-  }
+
+    return { width, height, cards, headers, paths };
+  }, [winnerRounds, loserRounds, grandFinal, winnerLayout, loserLayout]);
 
   return (
     <Box sx={{ position: 'relative', width, height, minWidth: width }}>
@@ -501,7 +512,7 @@ function BracketTree({
   const lastRoundYs = Array.from(positions[positions.length - 1]?.values() ?? []);
   const lastRoundBottom = Math.max(0, ...lastRoundYs) + CARD_HEIGHT / 2;
   const extraLabelTop = lastRoundBottom + EXTRA_MATCH_GAP;
-  const extraCardTop = extraLabelTop + EXTRA_LABEL_HEIGHT;
+  const extraCardTop = extraLabelTop + LABEL_ROW_HEIGHT;
   const containerHeight = extraMatch ? extraCardTop + CARD_HEIGHT + 16 : totalHeight;
 
   return (
@@ -577,8 +588,6 @@ function Connector({
   fromWidth: number;
   toWidth: number;
 }) {
-  const midX = CONNECTOR_WIDTH / 2;
-
   return (
     <Box component="svg" width={CONNECTOR_WIDTH} height={height} sx={{ display: 'block', flexShrink: 0 }}>
       {matches.map((match) => {
@@ -591,7 +600,7 @@ function Connector({
         return (
           <path
             key={match.id}
-            d={`M0 ${y} H${midX} V${targetY} H${CONNECTOR_WIDTH}`}
+            d={elbowPath(0, y, CONNECTOR_WIDTH, targetY)}
             fill="none"
             stroke={CONNECTOR_COLOR}
             strokeWidth={1.5}
@@ -643,6 +652,39 @@ function findMatch(bracket: Bracket, matchId: string): BracketMatch | null {
   return bracket.thirdPlace?.id === matchId ? bracket.thirdPlace : null;
 }
 
+/**
+ * Winner/hover styling for one slot of a match, shared by the card view (`SlotRow`) and the group
+ * matches table (`GroupMatchRow`) so the two stay in sync: `rowSx` goes on the container (winner
+ * tint + hover ring), `textSx` on the name itself (bold once either applies, dimmed when empty).
+ */
+function slotHighlight(slot: BracketSlot | null, winnerId: string | null, hoveredId: string | null) {
+  const isWinner = slot != null && winnerId === slot.participantId;
+  const isHovered = slot != null && slot.participantId === hoveredId;
+  return {
+    isWinner,
+    rowSx: {
+      bgcolor: isWinner ? 'rgba(63,185,80,0.15)' : 'transparent',
+      boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
+    },
+    textSx: {
+      color: slot ? 'text.primary' : 'text.disabled',
+      fontWeight: isWinner || isHovered ? 700 : 400,
+    },
+  };
+}
+
+/** The small "FF" badge for a forfeited match, shared by the card view and the group matches table. */
+function ForfeitChip({ sx }: { sx?: ComponentProps<typeof Chip>['sx'] }) {
+  return (
+    <Chip
+      size="small"
+      color="warning"
+      label="FF"
+      sx={{ height: 18, fontSize: '0.65rem', '& .MuiChip-label': { px: 0.75 }, ...sx }}
+    />
+  );
+}
+
 function MatchCard({
   match,
   onSelect,
@@ -671,14 +713,7 @@ function MatchCard({
       <SlotRow slot={match.participantA} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} />
       <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
       <SlotRow slot={match.participantB} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} />
-      {match.status === 'Forfeit' && (
-        <Chip
-          size="small"
-          color="warning"
-          label="FF"
-          sx={{ position: 'absolute', top: 4, right: 4, height: 18, fontSize: '0.65rem', '& .MuiChip-label': { px: 0.75 } }}
-        />
-      )}
+      {match.status === 'Forfeit' && <ForfeitChip sx={{ position: 'absolute', top: 4, right: 4 }} />}
     </Paper>
   );
 }
@@ -694,8 +729,7 @@ function SlotRow({
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
 }) {
-  const isWinner = slot != null && winnerId === slot.participantId;
-  const isHovered = slot != null && slot.participantId === hoveredId;
+  const { isWinner, rowSx, textSx } = slotHighlight(slot, winnerId, hoveredId);
   return (
     <Box
       onMouseEnter={slot ? () => onHover(slot.participantId) : undefined}
@@ -709,18 +743,10 @@ function SlotRow({
         justifyContent: 'space-between',
         overflow: 'hidden',
         gap: 1,
-        bgcolor: isWinner ? 'rgba(63,185,80,0.15)' : 'transparent',
-        boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
+        ...rowSx,
       }}
     >
-      <Typography
-        variant="body2"
-        noWrap
-        sx={{
-          color: slot ? 'text.primary' : 'text.disabled',
-          fontWeight: isWinner || isHovered ? 700 : 400,
-        }}
-      >
+      <Typography variant="body2" noWrap sx={textSx}>
         {slot ? slot.name : 'TBD'}
       </Typography>
       {isWinner && <Chip size="small" color="success" label="W" />}
@@ -782,18 +808,12 @@ function GroupMatchRow({
   const isDecided = match.status === 'Completed' || match.status === 'Forfeit';
 
   const nameCell = (slot: BracketSlot | null) => {
-    const isWinner = slot != null && match.winnerId === slot.participantId;
-    const isHovered = slot != null && slot.participantId === hoveredId;
+    const { rowSx, textSx } = slotHighlight(slot, match.winnerId, hoveredId);
     return (
       <TableCell
         onMouseEnter={slot ? () => onHover(slot.participantId) : undefined}
         onMouseLeave={slot ? () => onHover(null) : undefined}
-        sx={{
-          fontWeight: isWinner || isHovered ? 700 : 400,
-          color: slot ? 'text.primary' : 'text.disabled',
-          bgcolor: isWinner ? 'rgba(63,185,80,0.15)' : 'transparent',
-          boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
-        }}
+        sx={{ ...textSx, ...rowSx }}
       >
         {slot ? slot.name : 'TBD'}
       </TableCell>
@@ -809,14 +829,7 @@ function GroupMatchRow({
             <Typography variant="body2" component="span">
               {match.aggregateScoreA} – {match.aggregateScoreB}
             </Typography>
-            {match.status === 'Forfeit' && (
-              <Chip
-                size="small"
-                color="warning"
-                label="FF"
-                sx={{ height: 18, fontSize: '0.65rem', '& .MuiChip-label': { px: 0.75 } }}
-              />
-            )}
+            {match.status === 'Forfeit' && <ForfeitChip />}
           </Stack>
         ) : (
           <Typography variant="body2" color="text.secondary">
@@ -865,8 +878,8 @@ function StandingsTable({
           </TableHead>
           <TableBody>
             {standings.map((row, index) => {
-              const tier = bracketSplit ? (index < upperCount ? BRACKET_TIER_COLORS.upper : BRACKET_TIER_COLORS.lower) : null;
-              const colors = tier ?? RANK_COLORS[row.rank];
+              const tier = index < upperCount ? BRACKET_TIER_COLORS.upper : BRACKET_TIER_COLORS.lower;
+              const colors = bracketSplit ? tier : RANK_COLORS[row.rank];
               const isHovered = row.participantId === hoveredId;
               return (
                 <TableRow
@@ -886,8 +899,8 @@ function StandingsTable({
                           size="small"
                           label={index < upperCount ? 'Upper Bracket' : 'Lower Bracket'}
                           sx={{
-                            color: tier!.text,
-                            bgcolor: tier!.bg,
+                            color: tier.text,
+                            bgcolor: tier.bg,
                             fontWeight: 600,
                             '& .MuiChip-label': { px: 1 },
                           }}
