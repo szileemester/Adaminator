@@ -1,6 +1,6 @@
 namespace Adaminator.Application.Tournaments;
 
-public record ParticipantDto(Guid Id, string Name, int Seed, bool HasBye);
+public record ParticipantDto(Guid Id, string Name, int Seed, bool HasBye, int? GroupIndex);
 
 public record AddParticipantRequest(string Name);
 

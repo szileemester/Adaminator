@@ -43,6 +43,7 @@ export function PublicTournamentPage() {
                 <Stack spacing={1.5} divider={<Divider flexItem />}>
                   <PublicRow label="Date" value={data.date} />
                   <PublicRow label="Type" value={tournamentTypeLabels[data.type]} />
+                  {data.type === 'GroupStagePlayoff' && <PublicRow label="Groups" value={String(data.groupCount)} />}
                   <PublicRow label="Default match format" value={matchFormatLabels[data.defaultMatchFormat]} />
                   <PublicRow label="Default score type" value={scoreTypeLabels[data.defaultScoreType]} />
                   {data.notes?.trim() && <PublicRow label="Notes" value={data.notes} />}
@@ -71,7 +72,7 @@ export function PublicTournamentPage() {
           </Card>
         )}
 
-        {data?.bracket && data.bracket.winnerRounds.length > 0 && (
+        {data?.bracket && (data.bracket.winnerRounds.length > 0 || data.bracket.groups.length > 0) && (
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>

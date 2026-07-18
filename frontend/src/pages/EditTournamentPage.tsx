@@ -61,6 +61,7 @@ export function EditTournamentPage() {
                 defaultMatchFormat: tournament.defaultMatchFormat,
                 thirdPlaceEnabled: tournament.thirdPlaceEnabled,
                 defaultScoreType: tournament.defaultScoreType,
+                groupCount: tournament.groupCount || 2,
               }}
               onSubmit={(values) => {
                 setError(null);

@@ -40,10 +40,26 @@ public class BracketController : ControllerBase
         return Ok(participants);
     }
 
+    /// <summary>Group Stage + Playoff: random balanced group draw.</summary>
+    [HttpPost("bracket/draw-groups")]
+    public async Task<ActionResult<IReadOnlyList<ParticipantDto>>> DrawGroups(Guid tournamentId, CancellationToken cancellationToken)
+    {
+        var participants = await _service.DrawGroupsAsync(tournamentId, cancellationToken);
+        return Ok(participants);
+    }
+
     [HttpPost("start")]
     public async Task<ActionResult<TournamentDto>> Start(Guid tournamentId, CancellationToken cancellationToken)
     {
         var tournament = await _service.StartAsync(tournamentId, cancellationToken);
+        return Ok(tournament);
+    }
+
+    /// <summary>Group Stage + Playoff: generate and start the playoff from the group standings.</summary>
+    [HttpPost("start-playoffs")]
+    public async Task<ActionResult<TournamentDto>> StartPlayoffs(Guid tournamentId, CancellationToken cancellationToken)
+    {
+        var tournament = await _service.StartPlayoffsAsync(tournamentId, cancellationToken);
         return Ok(tournament);
     }
 

@@ -32,6 +32,9 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
         builder.Property(m => m.Round).IsRequired();
         builder.Property(m => m.IndexInRound).IsRequired();
 
+        // Group Stage + Playoff group-stage matches only; null for playoff matches and other types.
+        builder.Property(m => m.GroupIndex);
+
         builder.Property(m => m.ParticipantAId);
         builder.Property(m => m.ParticipantBId);
         builder.Property(m => m.WinnerId);

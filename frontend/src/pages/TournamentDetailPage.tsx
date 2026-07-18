@@ -20,13 +20,15 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
-import { deleteTournament, finishTournament, getBracket, getTournament } from '../api/tournaments';
+import FastForwardIcon from '@mui/icons-material/FastForward';
+import { deleteTournament, finishTournament, getBracket, getTournament, startPlayoffs } from '../api/tournaments';
 import { extractErrorMessage } from '../api/client';
 import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
 import { StatusChip } from '../components/StatusChip';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ParticipantsSection } from '../components/ParticipantsSection';
 import { BracketPreview } from '../components/BracketPreview';
+import { GroupsPreview } from '../components/GroupsPreview';
 import { BracketView } from '../components/BracketView';
 
 export function TournamentDetailPage() {
@@ -35,8 +37,9 @@ export function TournamentDetailPage() {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmFinishOpen, setConfirmFinishOpen] = useState(false);
+  const [confirmPlayoffsOpen, setConfirmPlayoffsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [finishError, setFinishError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: tournament, isLoading, isError, error } = useQuery({
     queryKey: ['tournaments', id],
@@ -71,7 +74,22 @@ export function TournamentDetailPage() {
     },
     onError: (err) => {
       setConfirmFinishOpen(false);
-      setFinishError(extractErrorMessage(err));
+      setActionError(extractErrorMessage(err));
+    },
+  });
+
+  const startPlayoffsMutation = useMutation({
+    mutationFn: () => startPlayoffs(id),
+    onSuccess: async () => {
+      setConfirmPlayoffsOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tournaments', id] }),
+        queryClient.invalidateQueries({ queryKey: ['bracket', id] }),
+      ]);
+    },
+    onError: (err) => {
+      setConfirmPlayoffsOpen(false);
+      setActionError(extractErrorMessage(err));
     },
   });
 
@@ -126,6 +144,9 @@ export function TournamentDetailPage() {
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, columnGap: 4, rowGap: 1.5 }}>
             <DetailRow label="Date" value={tournament.date} />
             <DetailRow label="Type" value={tournamentTypeLabels[tournament.type]} />
+            {tournament.type === 'GroupStagePlayoff' && (
+              <DetailRow label="Groups" value={String(tournament.groupCount)} />
+            )}
             <DetailRow label="Default match format" value={matchFormatLabels[tournament.defaultMatchFormat]} />
             <DetailRow label="Default score type" value={scoreTypeLabels[tournament.defaultScoreType]} />
             <DetailRow label="Third place match" value={tournament.thirdPlaceEnabled ? 'Enabled' : 'Disabled'} />
@@ -141,7 +162,11 @@ export function TournamentDetailPage() {
       {tournament.status === 'Planned' ? (
         <>
           <ParticipantsSection tournamentId={tournament.id} tournamentType={tournament.type} />
-          <BracketPreview tournamentId={tournament.id} tournamentType={tournament.type} />
+          {tournament.type === 'GroupStagePlayoff' ? (
+            <GroupsPreview tournamentId={tournament.id} groupCount={tournament.groupCount} />
+          ) : (
+            <BracketPreview tournamentId={tournament.id} tournamentType={tournament.type} />
+          )}
         </>
       ) : (
         <Card>
@@ -149,22 +174,34 @@ export function TournamentDetailPage() {
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
               <Typography variant="h6">Bracket</Typography>
               {tournament.status === 'Running' && (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="success"
-                  startIcon={<EmojiEventsIcon />}
-                  disabled={!bracket?.canFinish}
-                  onClick={() => setConfirmFinishOpen(true)}
-                >
-                  Finish tournament
-                </Button>
+                <Stack direction="row" spacing={1}>
+                  {bracket?.canStartPlayoffs && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<FastForwardIcon />}
+                      onClick={() => setConfirmPlayoffsOpen(true)}
+                    >
+                      Start playoffs
+                    </Button>
+                  )}
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="success"
+                    startIcon={<EmojiEventsIcon />}
+                    disabled={!bracket?.canFinish}
+                    onClick={() => setConfirmFinishOpen(true)}
+                  >
+                    Finish tournament
+                  </Button>
+                </Stack>
               )}
             </Stack>
 
-            {finishError && (
-              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setFinishError(null)}>
-                {finishError}
+            {actionError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
+                {actionError}
               </Alert>
             )}
 
@@ -218,6 +255,16 @@ export function TournamentDetailPage() {
         busy={finishMutation.isPending}
         onCancel={() => setConfirmFinishOpen(false)}
         onConfirm={() => finishMutation.mutate()}
+      />
+
+      <ConfirmDialog
+        open={confirmPlayoffsOpen}
+        title="Start playoffs"
+        message="This seeds and generates the playoff bracket from the group standings. Group results are locked in once the playoff starts."
+        confirmLabel="Start playoffs"
+        busy={startPlayoffsMutation.isPending}
+        onCancel={() => setConfirmPlayoffsOpen(false)}
+        onConfirm={() => startPlayoffsMutation.mutate()}
       />
 
       <Snackbar

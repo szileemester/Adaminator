@@ -26,6 +26,10 @@ public class CreateTournamentRequestValidator : AbstractValidator<CreateTourname
         RuleFor(x => x.DefaultScoreType)
             .Must((request, scoreType) => !(scoreType == ScoreType.WinnerOnly && request.DefaultMatchFormat != MatchFormat.Bo1))
             .WithMessage("Winner Only scoring is valid only for BO1 matches.");
+
+        RuleFor(x => x.GroupCount)
+            .GreaterThanOrEqualTo(2).When(x => x.Type == TournamentType.GroupStagePlayoff)
+            .WithMessage("Group Stage + Playoff needs at least 2 groups.");
     }
 }
 
@@ -51,5 +55,9 @@ public class UpdateTournamentRequestValidator : AbstractValidator<UpdateTourname
         RuleFor(x => x.DefaultScoreType)
             .Must((request, scoreType) => !(scoreType == ScoreType.WinnerOnly && request.DefaultMatchFormat != MatchFormat.Bo1))
             .WithMessage("Winner Only scoring is valid only for BO1 matches.");
+
+        RuleFor(x => x.GroupCount)
+            .GreaterThanOrEqualTo(2).When(x => x.Type == TournamentType.GroupStagePlayoff)
+            .WithMessage("Group Stage + Playoff needs at least 2 groups.");
     }
 }

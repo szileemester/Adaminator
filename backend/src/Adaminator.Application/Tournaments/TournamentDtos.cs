@@ -10,7 +10,8 @@ public record CreateTournamentRequest(
     TournamentType Type,
     MatchFormat DefaultMatchFormat,
     bool ThirdPlaceEnabled,
-    ScoreType DefaultScoreType = ScoreType.Games);
+    ScoreType DefaultScoreType = ScoreType.Games,
+    int GroupCount = 0);
 
 /// <summary>Payload for editing a Planned tournament (FR-TOUR-002).</summary>
 public record UpdateTournamentRequest(
@@ -20,7 +21,8 @@ public record UpdateTournamentRequest(
     TournamentType Type,
     MatchFormat DefaultMatchFormat,
     bool ThirdPlaceEnabled,
-    ScoreType DefaultScoreType = ScoreType.Games);
+    ScoreType DefaultScoreType = ScoreType.Games,
+    int GroupCount = 0);
 
 /// <summary>Full admin-facing representation of a tournament.</summary>
 public record TournamentDto(
@@ -32,6 +34,7 @@ public record TournamentDto(
     MatchFormat DefaultMatchFormat,
     bool ThirdPlaceEnabled,
     ScoreType DefaultScoreType,
+    int GroupCount,
     TournamentStatus Status,
     string PublicToken,
     DateTimeOffset CreatedAt);
@@ -53,6 +56,7 @@ public record PublicTournamentDto(
     TournamentType Type,
     MatchFormat DefaultMatchFormat,
     ScoreType DefaultScoreType,
+    int GroupCount,
     TournamentStatus Status,
     IReadOnlyList<ParticipantDto> Participants,
     BracketDto? Bracket);

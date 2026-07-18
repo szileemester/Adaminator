@@ -25,17 +25,26 @@ public static class RoundRobinBracket
         return participantCount % 2 == 0 ? participantCount - 1 : participantCount;
     }
 
-    /// <summary>
-    /// Builds the full round-robin schedule using the standard "circle method": participants are
-    /// ordered by seed; an odd count gets one virtual empty slot appended so the rotation math stays
-    /// uniform. Position 0 stays fixed and the remaining positions rotate by one after each round;
-    /// each round pairs position i with position (n-1-i). Whichever real participant lands opposite
-    /// the virtual empty slot sits out that round - no <see cref="Match"/> row is created for it,
-    /// mirroring how Single/Double Elimination create no match for a bye pairing.
-    /// </summary>
+    /// <summary>Builds one flat round-robin over the tournament's whole seeded roster (plain Round Robin).</summary>
     public static List<Match> BuildMatches(Tournament tournament)
     {
-        var slots = tournament.Participants.OrderBy(p => p.Seed).Select(p => (Guid?)p.Id).ToList();
+        var orderedIds = tournament.Participants.OrderBy(p => p.Seed).Select(p => p.Id).ToList();
+        return Schedule(tournament.Id, orderedIds, tournament.DefaultMatchFormat, tournament.DefaultScoreType, groupIndex: null);
+    }
+
+    /// <summary>
+    /// Builds a round-robin schedule over <paramref name="orderedIds"/> using the standard "circle
+    /// method": an odd count gets one virtual empty slot appended so the rotation math stays uniform;
+    /// position 0 stays fixed and the remaining positions rotate by one after each round; each round
+    /// pairs position i with position (n-1-i). Whichever real participant lands opposite the virtual
+    /// empty slot sits out that round - no <see cref="Match"/> row is created for it, mirroring how
+    /// Single/Double Elimination create no match for a bye pairing. Shared by plain Round Robin and
+    /// the Group Stage + Playoff per-group scheduling (which tags each match with its group via
+    /// <paramref name="groupIndex"/>).
+    /// </summary>
+    public static List<Match> Schedule(Guid tournamentId, IReadOnlyList<Guid> orderedIds, MatchFormat format, ScoreType scoreType, int? groupIndex)
+    {
+        var slots = orderedIds.Select(id => (Guid?)id).ToList();
         if (slots.Count % 2 != 0)
         {
             slots.Add(null);
@@ -43,8 +52,6 @@ public static class RoundRobinBracket
 
         var n = slots.Count;
         var rounds = n - 1;
-        var format = tournament.DefaultMatchFormat;
-        var scoreType = tournament.DefaultScoreType;
         var matches = new List<Match>();
 
         for (var round = 1; round <= rounds; round++)
@@ -56,7 +63,7 @@ public static class RoundRobinBracket
                 var b = slots[n - 1 - i];
                 if (a is not null && b is not null)
                 {
-                    matches.Add(Match.Create(tournament.Id, BracketSegment.RoundRobin, round, indexInRound, a, b, format, scoreType));
+                    matches.Add(Match.Create(tournamentId, BracketSegment.RoundRobin, round, indexInRound, a, b, format, scoreType, groupIndex));
                     indexInRound++;
                 }
             }

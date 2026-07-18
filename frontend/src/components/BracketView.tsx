@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import type { Bracket, BracketMatch, BracketRound, BracketSlot, PlacementGroup, StandingRow } from '../api/types';
+import { groupLabel } from '../api/types';
 import { MatchResultDialog } from './MatchResultDialog';
 
 const RANK_COLORS: Record<number, { trophy: string; bg: string }> = {
@@ -73,6 +74,25 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
   const selectedMatch = tournamentId && selectedMatchId ? findMatch(bracket, selectedMatchId) : null;
   const onSelect = tournamentId ? setSelectedMatchId : undefined;
 
+  const dialog =
+    selectedMatch && tournamentId ? (
+      <MatchResultDialog
+        key={selectedMatch.id}
+        tournamentId={tournamentId}
+        match={selectedMatch}
+        onClose={() => setSelectedMatchId(null)}
+      />
+    ) : null;
+
+  if (bracket.type === 'GroupStagePlayoff') {
+    return (
+      <>
+        <GroupStagePlayoffView bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
+        {dialog}
+      </>
+    );
+  }
+
   if (bracket.winnerRounds.length === 0) {
     return (
       <Typography color="text.secondary">
@@ -93,22 +113,7 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
       {tab === 0 ? (
         <Box sx={{ overflowX: 'auto' }}>
           {bracket.type === 'DoubleElimination' ? (
-            <Stack spacing={4}>
-              <BracketSection label="Winner Bracket" rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
-              {bracket.loserRounds.length > 0 && (
-                <BracketSection label="Loser Bracket" rounds={bracket.loserRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
-              )}
-              {bracket.grandFinal && (
-                <Stack spacing={1}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Grand Final
-                  </Typography>
-                  <Box sx={{ width: CARD_WIDTH }}>
-                    <MatchCard match={bracket.grandFinal} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
-                  </Box>
-                </Stack>
-              )}
-            </Stack>
+            <PlayoffBrackets bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
           ) : isRoundRobin ? (
             <Stack direction="row" spacing={3} sx={{ alignItems: 'stretch', minWidth: 'min-content' }}>
               <RoundColumns rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
@@ -129,14 +134,98 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
         <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={setHoveredId} />
       )}
 
-      {selectedMatch && tournamentId && (
-        <MatchResultDialog
-          key={selectedMatch.id}
-          tournamentId={tournamentId}
-          match={selectedMatch}
-          onClose={() => setSelectedMatchId(null)}
-        />
+      {dialog}
+    </Box>
+  );
+}
+
+/** Winner Bracket + Loser Bracket + Grand Final - shared by Double Elimination and the Group Stage + Playoff playoff. */
+function PlayoffBrackets({
+  bracket,
+  onSelect,
+  hoveredId,
+  onHover,
+}: {
+  bracket: Bracket;
+  onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
+  return (
+    <Stack spacing={4}>
+      <BracketSection label="Winner Bracket" rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+      {bracket.loserRounds.length > 0 && (
+        <BracketSection label="Loser Bracket" rounds={bracket.loserRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
       )}
+      {bracket.grandFinal && (
+        <Stack spacing={1}>
+          <Typography variant="subtitle2" color="text.secondary">
+            Grand Final
+          </Typography>
+          <Box sx={{ width: CARD_WIDTH }}>
+            <MatchCard match={bracket.grandFinal} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+          </Box>
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+/** Group Stage + Playoff: Group Stage tab (per-group schedule + standings), Playoffs tab, and Leaderboard tab. */
+function GroupStagePlayoffView({
+  bracket,
+  onSelect,
+  hoveredId,
+  onHover,
+}: {
+  bracket: Bracket;
+  onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
+  const playoffStarted = bracket.winnerRounds.length > 0;
+  const [tab, setTab] = useState(() => (bracket.status === 'Finished' ? 2 : playoffStarted ? 1 : 0));
+
+  return (
+    <Box sx={{ pb: 1 }}>
+      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
+        <Tab label="Group Stage" sx={{ minHeight: 36, py: 0 }} />
+        <Tab label="Playoffs" sx={{ minHeight: 36, py: 0 }} />
+        <Tab label="Leaderboard" sx={{ minHeight: 36, py: 0 }} />
+      </Tabs>
+
+      {tab === 0 && (
+        <Box sx={{ overflowX: 'auto' }}>
+          <Stack spacing={4}>
+            {bracket.groups.map((group) => (
+              <Stack key={group.groupIndex} spacing={1}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  {groupLabel(group.groupIndex)}
+                </Typography>
+                <Box sx={{ overflowX: 'auto' }}>
+                  <Stack direction="row" spacing={3} sx={{ alignItems: 'stretch', minWidth: 'min-content' }}>
+                    <RoundColumns rounds={group.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+                  </Stack>
+                </Box>
+                <StandingsTable standings={group.standings} hoveredId={hoveredId} onHover={onHover} />
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
+      {tab === 1 &&
+        (playoffStarted ? (
+          <Box sx={{ overflowX: 'auto' }}>
+            <PlayoffBrackets bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+          </Box>
+        ) : (
+          <Typography color="text.secondary">
+            The playoff bracket appears once the group stage is finished and the admin starts the playoffs.
+          </Typography>
+        ))}
+
+      {tab === 2 && <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={onHover} />}
     </Box>
   );
 }
@@ -386,7 +475,8 @@ function RoundColumns({
 }
 
 function findMatch(bracket: Bracket, matchId: string): BracketMatch | null {
-  for (const round of [...bracket.winnerRounds, ...bracket.loserRounds]) {
+  const groupRounds = bracket.groups.flatMap((group) => group.rounds);
+  for (const round of [...bracket.winnerRounds, ...bracket.loserRounds, ...groupRounds]) {
     const found = round.matches.find((m) => m.id === matchId);
     if (found) {
       return found;

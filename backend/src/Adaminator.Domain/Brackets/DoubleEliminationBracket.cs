@@ -25,6 +25,9 @@ public static class DoubleEliminationBracket
     /// <summary>There is no 2-slot Double Elimination topology; the smallest supported capacity is 4.</summary>
     public const int MinCapacity = 4;
 
+    /// <summary>The bracket capacities <see cref="GenerateTopology"/> supports.</summary>
+    public static readonly IReadOnlyList<int> SupportedCapacities = new[] { 4, 8, 16, 32 };
+
     public static int ComputeBracketSize(int participantCount) =>
         Math.Max(MinCapacity, SingleEliminationBracket.ComputeBracketSize(participantCount));
 
@@ -291,6 +294,22 @@ public static class DoubleEliminationBracket
         var grandFinalRef = new BracketMatchRef(BracketSegment.GrandFinal, 1, 0);
         byRef[grandFinalRef] = Match.Create(tournament.Id, BracketSegment.GrandFinal, 1, 0, null, null, format, scoreType);
 
+        ApplyRoutes(byRef, topologyByRef, ResolveRealDestination);
+
+        return byRef.Values.ToList();
+    }
+
+    /// <summary>
+    /// Resolves and persists every materialized match's forward routes from the topology. Shared with
+    /// <see cref="GroupStagePlayoffBracket"/>, which materializes a subset of the same topology (no
+    /// Winner round 1) and needs no hop. <paramref name="resolveHop"/> lets Double Elimination redirect
+    /// a route through matches its bye cascade collapsed away; omit it when every target is real.
+    /// </summary>
+    internal static void ApplyRoutes(
+        IReadOnlyDictionary<BracketMatchRef, Match> byRef,
+        IReadOnlyDictionary<BracketMatchRef, TopologyMatch> topologyByRef,
+        Func<BracketRoute, BracketRoute>? resolveHop = null)
+    {
         (Guid? Id, bool? SlotA) Resolve(BracketRoute? route)
         {
             if (route is not { } r)
@@ -298,23 +317,26 @@ public static class DoubleEliminationBracket
                 return (null, null);
             }
 
-            var resolved = ResolveRealDestination(r);
-            return (byRef[resolved.Target].Id, resolved.SlotA);
+            var resolved = resolveHop is null ? r : resolveHop(r);
+            if (!byRef.TryGetValue(resolved.Target, out var target))
+            {
+                // Every route must land on a materialized match; the only skipped refs (Winner round 1
+                // for Group Stage + Playoff) are never anyone's target.
+                throw new DomainException($"Bracket route points at a match that was not created: {resolved.Target}.");
+            }
+
+            return (target.Id, resolved.SlotA);
         }
 
-        // ---- Resolve and persist routing for every real match. ----
         foreach (var (matchRef, match) in byRef)
         {
             var topologyMatch = topologyByRef[matchRef];
             var (winnerToId, winnerToSlotA) = Resolve(topologyMatch.WinnerTo);
-            var (loserToId, loserToSlotA) = matchRef.Segment == BracketSegment.Winner
-                ? Resolve(topologyMatch.LoserTo)
-                : (null, null);
+            // Only Winner Bracket matches route a loser onward; the topology leaves LoserTo null elsewhere.
+            var (loserToId, loserToSlotA) = Resolve(topologyMatch.LoserTo);
 
             match.SetRoutes(winnerToId, winnerToSlotA, loserToId, loserToSlotA);
         }
-
-        return byRef.Values.ToList();
     }
 
     private static void LinkWinnerTo(List<TopologyMatch> matches, BracketMatchRef sourceRef, BracketRoute winnerTo)
@@ -336,9 +358,9 @@ public static class DoubleEliminationBracket
 
     private static void ValidateCapacity(int capacity)
     {
-        if (capacity is not (4 or 8 or 16 or 32))
+        if (!SupportedCapacities.Contains(capacity))
         {
-            throw new DomainException("Double Elimination supports only 4, 8, 16 or 32 slot brackets.");
+            throw new DomainException($"Double Elimination supports only {string.Join(", ", SupportedCapacities)} slot brackets.");
         }
     }
 }

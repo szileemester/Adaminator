@@ -39,7 +39,8 @@ public class TournamentService
             request.DefaultMatchFormat,
             request.DefaultScoreType,
             request.ThirdPlaceEnabled,
-            _timeProvider.GetUtcNow());
+            _timeProvider.GetUtcNow(),
+            request.GroupCount);
 
         await _repository.AddAsync(tournament, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -61,7 +62,8 @@ public class TournamentService
             request.Type,
             request.DefaultMatchFormat,
             request.DefaultScoreType,
-            request.ThirdPlaceEnabled);
+            request.ThirdPlaceEnabled,
+            request.GroupCount);
 
         await _repository.SaveChangesAsync(cancellationToken);
 

@@ -70,6 +70,11 @@ export async function generateBracket(tournamentId: string): Promise<Participant
   return data;
 }
 
+export async function drawGroups(tournamentId: string): Promise<Participant[]> {
+  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/bracket/draw-groups`);
+  return data;
+}
+
 export async function updateBracket(tournamentId: string, order: string[], byes: string[]): Promise<Participant[]> {
   const { data } = await apiClient.put(`/api/tournaments/${tournamentId}/bracket`, { order, byes });
   return data;
@@ -82,6 +87,11 @@ export async function startTournament(tournamentId: string): Promise<Tournament>
 
 export async function finishTournament(tournamentId: string): Promise<Tournament> {
   const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/finish`);
+  return data;
+}
+
+export async function startPlayoffs(tournamentId: string): Promise<Tournament> {
+  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/start-playoffs`);
   return data;
 }
 

@@ -17,10 +17,11 @@ const schema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(200, 'Name is too long'),
   date: z.string().min(1, 'Date is required'),
   notes: z.string().max(2000, 'Notes are too long').optional(),
-  type: z.enum(['SingleElimination', 'DoubleElimination', 'RoundRobin']),
+  type: z.enum(['SingleElimination', 'DoubleElimination', 'RoundRobin', 'GroupStagePlayoff']),
   defaultMatchFormat: z.enum(['Bo1', 'Bo3', 'Bo5', 'Bo7']),
   thirdPlaceEnabled: z.boolean(),
   defaultScoreType: z.enum(['WinnerOnly', 'Games', 'Points', 'Sets']),
+  groupCount: z.number().int('Enter a whole number').min(2, 'At least 2 groups').max(16, 'At most 16 groups'),
 });
 
 export type TournamentFormValues = z.infer<typeof schema>;
@@ -28,7 +29,7 @@ export type TournamentFormValues = z.infer<typeof schema>;
 const today = () => new Date().toISOString().slice(0, 10);
 
 const matchFormats: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
-const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination', 'RoundRobin'];
+const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination', 'RoundRobin', 'GroupStagePlayoff'];
 const scoreTypes: ScoreType[] = ['Games', 'Sets', 'Points', 'WinnerOnly'];
 
 interface TournamentFormProps {
@@ -63,12 +64,14 @@ export function TournamentForm({
       defaultMatchFormat: 'Bo3',
       thirdPlaceEnabled: false,
       defaultScoreType: 'Games',
+      groupCount: 2,
       ...initialValues,
     },
   });
 
   const selectedType = watch('type');
   const isSingleElimination = selectedType === 'SingleElimination';
+  const isGroupStagePlayoff = selectedType === 'GroupStagePlayoff';
   const selectedFormat = watch('defaultMatchFormat');
   const selectedScoreType = watch('defaultScoreType');
   const isBo1 = selectedFormat === 'Bo1';
@@ -96,6 +99,7 @@ export function TournamentForm({
       defaultMatchFormat: values.defaultMatchFormat,
       thirdPlaceEnabled: values.type === 'SingleElimination' && values.thirdPlaceEnabled,
       defaultScoreType: values.defaultMatchFormat !== 'Bo1' && values.defaultScoreType === 'WinnerOnly' ? 'Games' : values.defaultScoreType,
+      groupCount: values.type === 'GroupStagePlayoff' ? values.groupCount : 0,
     });
   });
 
@@ -123,6 +127,21 @@ export function TournamentForm({
             </TextField>
           )}
         />
+
+        {isGroupStagePlayoff && (
+          <TextField
+            label="Number of groups"
+            type="number"
+            required
+            slotProps={{ htmlInput: { min: 2, max: 16, inputMode: 'numeric' } }}
+            {...register('groupCount', { valueAsNumber: true })}
+            error={Boolean(errors.groupCount)}
+            helperText={
+              errors.groupCount?.message ??
+              'Participants are drawn randomly into this many groups. Requires a power-of-two roster (4/8/16/32) that divides evenly.'
+            }
+          />
+        )}
 
         <Controller
           name="defaultMatchFormat"

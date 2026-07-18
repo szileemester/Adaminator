@@ -34,6 +34,9 @@ public class Tournament
     /// <summary>Third Place Match is only ever enabled for Single Elimination (BR-006, FR-TOUR-007/008).</summary>
     public bool ThirdPlaceEnabled { get; private set; }
 
+    /// <summary>Group Stage + Playoff only: how many groups the roster is drawn into. 0 for every other type.</summary>
+    public int GroupCount { get; private set; }
+
     public TournamentStatus Status { get; private set; }
 
     /// <summary>
@@ -58,7 +61,8 @@ public class Tournament
         MatchFormat defaultMatchFormat,
         ScoreType defaultScoreType,
         bool thirdPlaceEnabled,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        int groupCount = 0)
     {
         var tournament = new Tournament
         {
@@ -68,7 +72,7 @@ public class Tournament
             CreatedAt = createdAt
         };
 
-        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled);
+        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount);
         return tournament;
     }
 
@@ -80,10 +84,11 @@ public class Tournament
         TournamentType type,
         MatchFormat defaultMatchFormat,
         ScoreType defaultScoreType,
-        bool thirdPlaceEnabled)
+        bool thirdPlaceEnabled,
+        int groupCount = 0)
     {
         EnsurePlanned("edited");
-        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled);
+        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount);
     }
 
     // ---- Participant management (Planned only) ----
@@ -170,6 +175,29 @@ public class Tournament
         }
     }
 
+    /// <summary>
+    /// Group Stage + Playoff only: randomly, balanced, deals the roster into <see cref="GroupCount"/>
+    /// groups (regenerate-able while Planned). Each participant gets a within-group order that drives
+    /// its group's round-robin schedule.
+    /// </summary>
+    public void DrawGroups()
+    {
+        EnsurePlanned("changed");
+        if (Type != TournamentType.GroupStagePlayoff)
+        {
+            throw new DomainException("Group draw is only available for Group Stage + Playoff tournaments.");
+        }
+
+        GroupStagePlayoffBracket.ValidateShape(_participants.Count, GroupCount);
+
+        var shuffled = _participants.OrderBy(_ => Random.Shared.Next()).ToList();
+        var perGroup = _participants.Count / GroupCount;
+        for (var i = 0; i < shuffled.Count; i++)
+        {
+            shuffled[i].SetGroup(groupIndex: i / perGroup, seedWithinGroup: i % perGroup + 1);
+        }
+    }
+
     // ---- Start (Planned -> Running) ----
 
     public void Start()
@@ -180,16 +208,27 @@ public class Tournament
             throw new DomainException($"A tournament needs between {MinParticipants} and {MaxParticipants} participants to start.");
         }
 
-        if (!IsSeeded)
+        if (Type == TournamentType.GroupStagePlayoff)
+        {
+            if (_participants.Any(p => p.GroupIndex is null))
+            {
+                throw new DomainException("Draw the groups before starting the tournament.");
+            }
+
+            GroupStagePlayoffBracket.ValidateShape(_participants.Count, GroupCount);
+        }
+        else if (!IsSeeded)
         {
             throw new DomainException("Generate the bracket before starting the tournament.");
         }
 
-        // BuildMatches re-validates the bye count against the bracket size.
+        // BuildMatches re-validates the bye count against the bracket size. Group Stage + Playoff
+        // starts with only the group stage; the playoff is built later by StartPlayoffs().
         var matches = Type switch
         {
             TournamentType.DoubleElimination => DoubleEliminationBracket.BuildMatches(this),
             TournamentType.RoundRobin => RoundRobinBracket.BuildMatches(this),
+            TournamentType.GroupStagePlayoff => GroupStagePlayoffBracket.BuildGroupStage(this),
             _ => SingleEliminationBracket.BuildMatches(this)
         };
         _matches.AddRange(matches);
@@ -245,6 +284,93 @@ public class Tournament
         Status = TournamentStatus.Finished;
     }
 
+    /// <summary>True once the group stage is complete and the admin can generate the playoff by hand (Group Stage + Playoff only).</summary>
+    public bool CanStartPlayoffs =>
+        Type == TournamentType.GroupStagePlayoff
+        && Status == TournamentStatus.Running
+        && !PlayoffStarted
+        && GroupStageDecided;
+
+    /// <summary>
+    /// Group Stage + Playoff only: seeds and builds the double-elimination playoff from the final
+    /// group standings (each group's top half into the Winner Bracket, bottom half into the Loser
+    /// Bracket). A deliberate admin action, gated on <see cref="CanStartPlayoffs"/>.
+    /// </summary>
+    public void StartPlayoffs()
+    {
+        if (Type != TournamentType.GroupStagePlayoff)
+        {
+            throw new DomainException("Playoffs are only available for Group Stage + Playoff tournaments.");
+        }
+
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("Playoffs can only be started while the tournament is Running.");
+        }
+
+        if (PlayoffStarted)
+        {
+            throw new DomainException("The playoff has already started.");
+        }
+
+        if (!GroupStageDecided)
+        {
+            throw new DomainException("Every group match must be decided before starting the playoff.");
+        }
+
+        var names = _participants.ToDictionary(p => p.Id, p => p.Name);
+        var groupStandings = new List<IReadOnlyList<Guid>>(GroupCount);
+        for (var g = 0; g < GroupCount; g++)
+        {
+            var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
+            var groupMatches = GroupMatches.Where(m => m.GroupIndex == g);
+            var ranked = RoundRobinStandings.Rank(groupMatches, groupParticipants, names).Select(r => r.ParticipantId).ToList();
+            groupStandings.Add(ranked);
+        }
+
+        var (upperSeeds, lowerSeeds) = GroupStagePlayoffBracket.SeedPools(groupStandings);
+        _matches.AddRange(GroupStagePlayoffBracket.BuildPlayoff(this, upperSeeds, lowerSeeds));
+    }
+
+    private IEnumerable<Match> GroupMatches => _matches.Where(m => m.Segment == BracketSegment.RoundRobin);
+
+    /// <summary>Whether the group stage exists and every one of its matches is decided (single pass over the match list).</summary>
+    private bool GroupStageDecided
+    {
+        get
+        {
+            var any = false;
+            foreach (var match in _matches)
+            {
+                if (match.Segment != BracketSegment.RoundRobin)
+                {
+                    continue;
+                }
+
+                if (!IsDecided(match))
+                {
+                    return false;
+                }
+
+                any = true;
+            }
+
+            return any;
+        }
+    }
+
+    /// <summary>Group Stage + Playoff: whether the playoff bracket has been generated (any elimination-segment match exists).</summary>
+    private bool PlayoffStarted =>
+        _matches.Any(m => m.Segment is BracketSegment.Winner or BracketSegment.Loser or BracketSegment.GrandFinal);
+
+    /// <summary>
+    /// Whether this tournament's elimination matches advance/undo by following routes persisted on the
+    /// match (Double Elimination, and the Group Stage + Playoff playoff) rather than Single
+    /// Elimination's positional round math. Callers check this only after excluding
+    /// <see cref="BracketSegment.RoundRobin"/> matches, which never advance at all.
+    /// </summary>
+    private bool UsesStoredRoutes => Type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff;
+
     /// <summary>
     /// Double Elimination only: the Loser Bracket Final's decided loser - there is no separate
     /// Third Place match (BR-008). Null if undecided, or if this participant count's bye cascade
@@ -254,7 +380,7 @@ public class Tournament
     {
         get
         {
-            if (Type != TournamentType.DoubleElimination)
+            if (Type is not (TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff))
             {
                 return null;
             }
@@ -282,13 +408,13 @@ public class Tournament
             return false;
         }
 
-        if (Type == TournamentType.RoundRobin)
+        if (match.Segment == BracketSegment.RoundRobin)
         {
-            // Round Robin matches have no dependents; the latest-decided check above is sufficient.
+            // Round Robin / group-stage matches have no dependents; the latest-decided check suffices.
             return true;
         }
 
-        if (Type == TournamentType.DoubleElimination)
+        if (UsesStoredRoutes)
         {
             var (winnerRouteMatch, _, loserRouteMatch, _) = FindUndoDependentsDoubleElimination(match);
             return !IsBlockedFrom(winnerRouteMatch, loserRouteMatch);
@@ -317,7 +443,8 @@ public class Tournament
 
         var (winnerId, loserId) = WinnerAndLoser(match);
 
-        if (Type == TournamentType.DoubleElimination)
+        // Round Robin / group-stage matches feed nothing, so there is no dependent slot to clear.
+        if (match.Segment != BracketSegment.RoundRobin && UsesStoredRoutes)
         {
             var (winnerRouteMatch, winnerRouteSlotA, loserRouteMatch, loserRouteSlotA) = FindUndoDependentsDoubleElimination(match);
 
@@ -329,9 +456,8 @@ public class Tournament
             winnerRouteMatch?.ClearSlot(winnerRouteSlotA, winnerId);
             loserRouteMatch?.ClearSlot(loserRouteSlotA, loserId);
         }
-        else if (Type != TournamentType.RoundRobin)
+        else if (match.Segment != BracketSegment.RoundRobin)
         {
-            // Round Robin matches have no dependents to clear.
             var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
 
             if (IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch))
@@ -353,15 +479,15 @@ public class Tournament
 
     private void Advance(Match match)
     {
-        if (Type == TournamentType.DoubleElimination)
+        if (match.Segment == BracketSegment.RoundRobin)
         {
-            AdvanceDoubleElimination(match);
+            // Round Robin / group-stage matches never feed into another match.
             return;
         }
 
-        if (Type == TournamentType.RoundRobin)
+        if (UsesStoredRoutes)
         {
-            // Round Robin matches never feed into another match.
+            AdvanceDoubleElimination(match);
             return;
         }
 
@@ -409,7 +535,9 @@ public class Tournament
     /// <summary>Whether the Final (and, if enabled, Third Place) - or the Grand Final, or every match for Round Robin - is decided.</summary>
     private bool IsReadyToFinish()
     {
-        if (Type == TournamentType.DoubleElimination)
+        // Double Elimination and the Group Stage + Playoff playoff both finish on their Grand Final;
+        // for the latter that match only exists once the playoff has been started.
+        if (Type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff)
         {
             var grandFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
             return grandFinal is not null && IsDecided(grandFinal);
@@ -509,7 +637,8 @@ public class Tournament
         TournamentType type,
         MatchFormat defaultMatchFormat,
         ScoreType defaultScoreType,
-        bool thirdPlaceEnabled)
+        bool thirdPlaceEnabled,
+        int groupCount)
     {
         name = (name ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(name))
@@ -538,6 +667,11 @@ public class Tournament
             throw new DomainException("Winner Only scoring is valid only for BO1 matches.");
         }
 
+        if (type == TournamentType.GroupStagePlayoff && groupCount < 2)
+        {
+            throw new DomainException("Group Stage + Playoff needs at least 2 groups.");
+        }
+
         Name = name;
         Date = date;
         Notes = notes;
@@ -545,6 +679,7 @@ public class Tournament
         DefaultMatchFormat = defaultMatchFormat;
         DefaultScoreType = defaultScoreType;
         ThirdPlaceEnabled = type == TournamentType.SingleElimination && thirdPlaceEnabled;
+        GroupCount = type == TournamentType.GroupStagePlayoff ? groupCount : 0;
     }
 
     private void EnsurePlanned(string action)

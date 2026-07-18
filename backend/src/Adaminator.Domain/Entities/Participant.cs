@@ -23,6 +23,12 @@ public class Participant
     /// <summary>Whether this participant receives a first-round bye in the current preview.</summary>
     public bool HasBye { get; private set; }
 
+    /// <summary>
+    /// Group Stage + Playoff only: the 0-based group this participant was drawn into. Null for every
+    /// other tournament type and until the group draw runs.
+    /// </summary>
+    public int? GroupIndex { get; private set; }
+
     internal static Participant Create(Guid tournamentId, string name) => new()
     {
         Id = Guid.NewGuid(),
@@ -40,10 +46,19 @@ public class Participant
         HasBye = hasBye;
     }
 
+    /// <summary>Group Stage + Playoff: assigns this participant to a group with an order (1-based) within it that drives the round-robin schedule.</summary>
+    internal void SetGroup(int groupIndex, int seedWithinGroup)
+    {
+        GroupIndex = groupIndex;
+        Seed = seedWithinGroup;
+        HasBye = false;
+    }
+
     internal void ClearSeed()
     {
         Seed = 0;
         HasBye = false;
+        GroupIndex = null;
     }
 
     private static string NormalizeName(string name)

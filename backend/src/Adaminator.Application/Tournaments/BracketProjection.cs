@@ -1,3 +1,4 @@
+using Adaminator.Domain.Brackets;
 using Adaminator.Domain.Entities;
 using Adaminator.Domain.Enums;
 
@@ -22,6 +23,11 @@ internal static class BracketProjection
             return BuildRoundRobin(tournament, names);
         }
 
+        if (tournament.Type == TournamentType.GroupStagePlayoff)
+        {
+            return BuildGroupStagePlayoff(tournament, names);
+        }
+
         var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
         var totalRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
         var rounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), names, tournament);
@@ -38,6 +44,8 @@ internal static class BracketProjection
             ThirdPlacePodium: null,
             Standings: Array.Empty<StandingRowDto>(),
             Placements: BuildSingleEliminationPlacements(winnerMatches, totalRounds, thirdPlace, names),
+            Groups: Array.Empty<GroupDto>(),
+            CanStartPlayoffs: false,
             CanFinish: tournament.CanFinish);
     }
 
@@ -148,40 +156,55 @@ internal static class BracketProjection
             GrandFinal: null,
             ThirdPlace: null,
             ThirdPlacePodium: null,
-            Standings: BuildStandings(matches, names),
+            Standings: BuildStandings(matches, tournament.Participants, names),
             Placements: Array.Empty<PlacementGroupDto>(),
+            Groups: Array.Empty<GroupDto>(),
+            CanStartPlayoffs: false,
             CanFinish: tournament.CanFinish);
     }
 
     /// <summary>
-    /// Ranks participants by decided Round Robin matches. Ties are broken by fewer losses, then by
-    /// name for a fully deterministic order - the spec defines no head-to-head tiebreaker.
+    /// Group Stage + Playoff: always projects the group-stage schedules + standings; once the playoff
+    /// has been started it also projects the double-elimination playoff (reusing the Double Elimination
+    /// projection pieces, since the playoff <em>is</em> a standard double elimination).
     /// </summary>
-    private static IReadOnlyList<StandingRowDto> BuildStandings(List<Match> matches, IReadOnlyDictionary<Guid, string> names)
+    private static BracketDto BuildGroupStagePlayoff(Tournament tournament, IReadOnlyDictionary<Guid, string> names)
     {
-        var wins = new Dictionary<Guid, int>();
-        var losses = new Dictionary<Guid, int>();
+        var matchesByGroup = tournament.Matches
+            .Where(m => m.Segment == BracketSegment.RoundRobin)
+            .ToLookup(m => m.GroupIndex);
+        var participantsByGroup = tournament.Participants.ToLookup(p => p.GroupIndex);
 
-        foreach (var match in matches)
+        var groups = new List<GroupDto>(tournament.GroupCount);
+        for (var g = 0; g < tournament.GroupCount; g++)
         {
-            if (match.WinnerId is not { } winnerId || match.ParticipantAId is not { } a || match.ParticipantBId is not { } b)
-            {
-                continue;
-            }
+            var groupMatches = matchesByGroup[g].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList();
 
-            var loserId = winnerId == a ? b : a;
-            wins[winnerId] = wins.GetValueOrDefault(winnerId) + 1;
-            losses[loserId] = losses.GetValueOrDefault(loserId) + 1;
+            groups.Add(new GroupDto(
+                g,
+                GroupIntoRounds(groupMatches, PlainRoundTitle, names, tournament),
+                BuildStandings(groupMatches, participantsByGroup[g].ToList(), names)));
         }
 
-        return names
-            .Select(kvp => (Id: kvp.Key, Name: kvp.Value, Wins: wins.GetValueOrDefault(kvp.Key), Losses: losses.GetValueOrDefault(kvp.Key)))
-            .OrderByDescending(p => p.Wins)
-            .ThenBy(p => p.Losses)
-            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-            .Select((p, i) => new StandingRowDto(i + 1, p.Id, p.Name, p.Wins + p.Losses, p.Wins, p.Losses))
-            .ToList();
+        // The playoff *is* a standard double elimination, so reuse that projection wholesale and just
+        // layer the group stage on top. Before StartPlayoffs it simply projects empty playoff rounds.
+        return BuildDoubleElimination(tournament, names) with
+        {
+            Groups = groups,
+            CanStartPlayoffs = tournament.CanStartPlayoffs,
+        };
     }
+
+    /// <summary>
+    /// Ranks participants by decided round-robin matches via the shared domain ranker
+    /// (<see cref="RoundRobinStandings"/>) - the same order used to seed the Group Stage + Playoff -
+    /// then maps to display rows with a 1-based rank.
+    /// </summary>
+    private static IReadOnlyList<StandingRowDto> BuildStandings(
+        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, string> names) =>
+        RoundRobinStandings.Rank(matches, participants, names)
+            .Select((row, i) => new StandingRowDto(i + 1, row.ParticipantId, names[row.ParticipantId], row.Played, row.Wins, row.Losses))
+            .ToList();
 
     /// <summary>
     /// Double Elimination has no separate Third Place match - <see cref="BracketDto.ThirdPlacePodium"/>
@@ -211,6 +234,8 @@ internal static class BracketProjection
             thirdPlacePodium,
             Standings: Array.Empty<StandingRowDto>(),
             Placements: BuildDoubleEliminationPlacements(grandFinal, thirdPlacePodium, loserMatches, names),
+            Groups: Array.Empty<GroupDto>(),
+            CanStartPlayoffs: false,
             CanFinish: tournament.CanFinish);
     }
 

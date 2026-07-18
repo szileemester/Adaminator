@@ -35,6 +35,9 @@ public record StandingRowDto(int Rank, Guid ParticipantId, string Name, int Play
 /// </summary>
 public record PlacementGroupDto(int RankStart, int RankEnd, string Label, IReadOnlyList<BracketSlotDto> Participants);
 
+/// <summary>Group Stage + Playoff only: one group's round-robin schedule and current standings.</summary>
+public record GroupDto(int GroupIndex, IReadOnlyList<BracketRoundDto> Rounds, IReadOnlyList<StandingRowDto> Standings);
+
 public record BracketDto(
     TournamentType Type,
     TournamentStatus Status,
@@ -45,4 +48,6 @@ public record BracketDto(
     BracketSlotDto? ThirdPlacePodium,
     IReadOnlyList<StandingRowDto> Standings,
     IReadOnlyList<PlacementGroupDto> Placements,
+    IReadOnlyList<GroupDto> Groups,
+    bool CanStartPlayoffs,
     bool CanFinish);

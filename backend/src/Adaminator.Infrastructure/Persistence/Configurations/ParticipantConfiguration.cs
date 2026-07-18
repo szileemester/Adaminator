@@ -21,6 +21,9 @@ public class ParticipantConfiguration : IEntityTypeConfiguration<Participant>
         builder.Property(p => p.Seed).IsRequired();
         builder.Property(p => p.HasBye).IsRequired();
 
+        // Group Stage + Playoff only; null for every other type.
+        builder.Property(p => p.GroupIndex);
+
         // Names are unique within a tournament (BR-024).
         builder.HasIndex(p => new { p.TournamentId, p.Name }).IsUnique();
     }

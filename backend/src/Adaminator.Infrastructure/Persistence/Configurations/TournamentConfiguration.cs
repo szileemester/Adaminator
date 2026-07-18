@@ -46,6 +46,9 @@ public class TournamentConfiguration : IEntityTypeConfiguration<Tournament>
 
         builder.Property(t => t.ThirdPlaceEnabled).IsRequired();
 
+        // Group Stage + Playoff only; 0 for every other type.
+        builder.Property(t => t.GroupCount).IsRequired();
+
         builder.Property(t => t.PublicToken)
             .IsRequired()
             .HasMaxLength(64);

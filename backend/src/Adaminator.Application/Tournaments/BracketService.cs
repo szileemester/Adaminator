@@ -47,10 +47,28 @@ public class BracketService
         return tournament.Participants.ToOrderedDtos();
     }
 
+    /// <summary>Group Stage + Playoff: random balanced group draw (regenerate-able while Planned).</summary>
+    public async Task<IReadOnlyList<ParticipantDto>> DrawGroupsAsync(Guid tournamentId, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.DrawGroups();
+        await _repository.SaveChangesAsync(cancellationToken);
+        return tournament.Participants.ToOrderedDtos();
+    }
+
     public async Task<TournamentDto> StartAsync(Guid tournamentId, CancellationToken cancellationToken = default)
     {
         var tournament = await LoadAsync(tournamentId, cancellationToken);
         tournament.Start();
+        await _repository.SaveChangesAsync(cancellationToken);
+        return tournament.ToDto();
+    }
+
+    /// <summary>Group Stage + Playoff: generates and starts the playoff from the group standings (rejected until every group match is decided).</summary>
+    public async Task<TournamentDto> StartPlayoffsAsync(Guid tournamentId, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.StartPlayoffs();
         await _repository.SaveChangesAsync(cancellationToken);
         return tournament.ToDto();
     }

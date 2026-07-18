@@ -346,6 +346,141 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    /// <summary>Completes a Bo1 / Winner Only match for participant A (the Group Stage + Playoff default scoring).</summary>
+    private static async Task CompleteWinnerOnlyAsync(HttpClient client, Guid tournamentId, Guid matchId)
+    {
+        var response = await client.PostAsJsonAsync(
+            $"/api/tournaments/{tournamentId}/matches/{matchId}/complete",
+            new { matchFormat = "Bo1", scoreType = "WinnerOnly", entries = new[] { Entry(true) } });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    /// <summary>Repeatedly completes any actionable playoff match (participant A wins) until the Grand Final is decided.</summary>
+    private async Task PlayOutPlayoffAsync(HttpClient client, Guid tournamentId)
+    {
+        for (var guard = 0; guard < 200; guard++)
+        {
+            var bracket = await GetBracketAsync(client, tournamentId);
+            var playoffMatches = bracket.WinnerRounds
+                .Concat(bracket.LoserRounds)
+                .SelectMany(r => r.Matches)
+                .Concat(bracket.GrandFinal is null ? Array.Empty<MatchResponse>() : new[] { bracket.GrandFinal });
+
+            var next = playoffMatches.FirstOrDefault(m =>
+                m.Status == "Pending" && m.ParticipantA is not null && m.ParticipantB is not null);
+            if (next is null)
+            {
+                return;
+            }
+
+            await CompleteWinnerOnlyAsync(client, tournamentId, next.Id);
+        }
+
+        throw new InvalidOperationException("Playoff did not resolve within the iteration guard.");
+    }
+
+    [Fact]
+    public async Task Group_stage_playoff_full_flow_draws_plays_groups_seeds_and_finishes_the_playoff()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var create = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = $"Major {Guid.NewGuid():N}",
+            date = "2026-07-18",
+            type = "GroupStagePlayoff",
+            defaultMatchFormat = "Bo1",
+            thirdPlaceEnabled = false,
+            defaultScoreType = "WinnerOnly",
+            groupCount = 2
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+
+        foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H" })
+        {
+            await client.PostAsJsonAsync($"/api/tournaments/{tournamentId}/participants", new { name });
+        }
+
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/bracket/draw-groups", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // The playoff cannot start until every group match is decided.
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start-playoffs", null)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var groupBracket = await GetBracketAsync(client, tournamentId);
+        groupBracket.Groups.Should().HaveCount(2);
+        foreach (var groupMatch in groupBracket.Groups.SelectMany(g => g.Rounds).SelectMany(r => r.Matches))
+        {
+            await CompleteWinnerOnlyAsync(client, tournamentId, groupMatch.Id);
+        }
+
+        var afterGroups = await GetBracketAsync(client, tournamentId);
+        afterGroups.CanStartPlayoffs.Should().BeTrue();
+        afterGroups.Groups.Should().OnlyContain(g => g.Standings.Count == 4);
+
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start-playoffs", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var playoff = await GetBracketAsync(client, tournamentId);
+        playoff.WinnerRounds.SelectMany(r => r.Matches).Should().NotBeEmpty();
+        playoff.LoserRounds.SelectMany(r => r.Matches).Should().NotBeEmpty();
+        playoff.GrandFinal.Should().NotBeNull();
+        // No Winner round 1 - the upper seeds enter at round 2.
+        playoff.WinnerRounds.Should().NotContain(r => r.Round == 1);
+
+        await PlayOutPlayoffAsync(client, tournamentId);
+
+        (await GetBracketAsync(client, tournamentId)).CanFinish.Should().BeTrue();
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/finish", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.GetFromJsonAsync<TournamentStatusResponse>($"/api/tournaments/{tournamentId}", JsonOptions))!
+            .Status.Should().Be("Finished");
+    }
+
+    [Fact]
+    public async Task Group_stage_playoff_rejects_fewer_than_two_groups()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var create = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = "Bad Major",
+            date = "2026-07-18",
+            type = "GroupStagePlayoff",
+            defaultMatchFormat = "Bo1",
+            thirdPlaceEnabled = false,
+            defaultScoreType = "WinnerOnly",
+            groupCount = 1
+        });
+
+        create.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Group_draw_rejects_an_unsupported_participant_count()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var create = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = $"Major {Guid.NewGuid():N}",
+            date = "2026-07-18",
+            type = "GroupStagePlayoff",
+            defaultMatchFormat = "Bo1",
+            thirdPlaceEnabled = false,
+            defaultScoreType = "WinnerOnly",
+            groupCount = 2
+        });
+        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+
+        foreach (var name in new[] { "A", "B", "C", "D", "E", "F" }) // 6 is not a power of two
+        {
+            await client.PostAsJsonAsync($"/api/tournaments/{tournamentId}/participants", new { name });
+        }
+
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/bracket/draw-groups", null))
+            .StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     private static MatchResponse MatchIn(BracketResponse bracket, Guid matchId) =>
         bracket.WinnerRounds.SelectMany(r => r.Matches).Concat(bracket.ThirdPlace is null ? [] : [bracket.ThirdPlace])
             .Single(m => m.Id == matchId);
@@ -402,6 +537,8 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         DateTimeOffset? CompletedAt, bool CanUndo);
     private record RoundResponse(int Round, string Title, List<MatchResponse> Matches);
     private record PlacementGroupResponse(int RankStart, int RankEnd, string Label, List<ParticipantSlotResponse> Participants);
+    private record StandingRowResponse(int Rank, Guid ParticipantId, string Name, int Played, int Wins, int Losses);
+    private record GroupResponse(int GroupIndex, List<RoundResponse> Rounds, List<StandingRowResponse> Standings);
     private record BracketResponse(
         List<RoundResponse> WinnerRounds,
         List<RoundResponse> LoserRounds,
@@ -409,5 +546,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         MatchResponse? ThirdPlace,
         ParticipantSlotResponse? ThirdPlacePodium,
         List<PlacementGroupResponse> Placements,
+        List<GroupResponse> Groups,
+        bool CanStartPlayoffs,
         bool CanFinish);
 }

@@ -32,6 +32,12 @@ public class Match
     /// <summary>0-based position of the match within its round. May be sparse in round 1 (byes).</summary>
     public int IndexInRound { get; private set; }
 
+    /// <summary>
+    /// Group Stage + Playoff only: the 0-based group a group-stage (<see cref="BracketSegment.RoundRobin"/>)
+    /// match belongs to. Null for playoff matches and for every other tournament type.
+    /// </summary>
+    public int? GroupIndex { get; private set; }
+
     public Guid? ParticipantAId { get; private set; }
     public Guid? ParticipantBId { get; private set; }
 
@@ -74,13 +80,15 @@ public class Match
         Guid? participantAId,
         Guid? participantBId,
         MatchFormat matchFormat,
-        ScoreType scoreType) => new()
+        ScoreType scoreType,
+        int? groupIndex = null) => new()
     {
         Id = Guid.NewGuid(),
         TournamentId = tournamentId,
         Segment = segment,
         Round = round,
         IndexInRound = indexInRound,
+        GroupIndex = groupIndex,
         ParticipantAId = participantAId,
         ParticipantBId = participantBId,
         MatchFormat = matchFormat,
