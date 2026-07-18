@@ -3,6 +3,7 @@ import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
+  Box,
   Button,
   Checkbox,
   FormControlLabel,
@@ -105,7 +106,9 @@ export function TournamentForm({
 
   return (
     <form onSubmit={submit} noValidate>
-      <Stack spacing={3}>
+      {/* Two columns on md+ so short controls (Name, Type, format/score pickers) don't stretch
+          across the whole card - Date/Notes/buttons stay full width via gridColumn: '1 / -1'. */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
         <TextField
           label="Name"
           required
@@ -127,21 +130,6 @@ export function TournamentForm({
             </TextField>
           )}
         />
-
-        {isGroupStagePlayoff && (
-          <TextField
-            label="Number of groups"
-            type="number"
-            required
-            slotProps={{ htmlInput: { min: 2, max: 16, inputMode: 'numeric' } }}
-            {...register('groupCount', { valueAsNumber: true })}
-            error={Boolean(errors.groupCount)}
-            helperText={
-              errors.groupCount?.message ??
-              'Participants are drawn randomly into this many groups. Requires a power-of-two roster (4/8/16/32) that divides evenly.'
-            }
-          />
-        )}
 
         <Controller
           name="defaultMatchFormat"
@@ -171,6 +159,21 @@ export function TournamentForm({
           )}
         />
 
+        {isGroupStagePlayoff && (
+          <TextField
+            label="Number of groups"
+            type="number"
+            required
+            slotProps={{ htmlInput: { min: 2, max: 16, inputMode: 'numeric' } }}
+            {...register('groupCount', { valueAsNumber: true })}
+            error={Boolean(errors.groupCount)}
+            helperText={
+              errors.groupCount?.message ??
+              'Participants are drawn randomly into this many groups. Requires a power-of-two roster (4/8/16/32) that divides evenly.'
+            }
+          />
+        )}
+
         <Controller
           name="thirdPlaceEnabled"
           control={control}
@@ -178,6 +181,9 @@ export function TournamentForm({
             <FormControlLabel
               control={<Checkbox checked={field.value} onChange={field.onChange} disabled={!isSingleElimination} />}
               label="Third place match (Single Elimination only)"
+              // Pinned to column 2 (rather than left to grid auto-flow) so it doesn't jump into
+              // column 1 whenever "Number of groups" above it is absent (non-GSP tournaments).
+              sx={{ gridColumn: { xs: '1 / -1', md: '2' } }}
             />
           )}
         />
@@ -190,6 +196,7 @@ export function TournamentForm({
           {...register('date')}
           error={Boolean(errors.date)}
           helperText={errors.date?.message}
+          sx={{ gridColumn: '1 / -1' }}
         />
 
         <TextField
@@ -199,9 +206,10 @@ export function TournamentForm({
           {...register('notes')}
           error={Boolean(errors.notes)}
           helperText={errors.notes?.message}
+          sx={{ gridColumn: '1 / -1' }}
         />
 
-        <Stack direction="row" spacing={2}>
+        <Stack direction="row" spacing={2} sx={{ gridColumn: '1 / -1' }}>
           <Button type="submit" variant="contained" disabled={submitting}>
             {submitLabel}
           </Button>
@@ -211,7 +219,7 @@ export function TournamentForm({
             </Button>
           )}
         </Stack>
-      </Stack>
+      </Box>
     </form>
   );
 }
