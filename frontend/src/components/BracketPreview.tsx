@@ -24,6 +24,7 @@ import type { Participant, TournamentType } from '../api/types';
 import { requiredByes } from '../api/types';
 import { extractErrorMessage } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ParticipantLabel } from './ParticipantLabel';
 
 export function BracketPreview({ tournamentId, tournamentType }: { tournamentId: string; tournamentType: TournamentType }) {
   const queryClient = useQueryClient();
@@ -185,7 +186,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Chip size="small" variant="outlined" label={index + 1} />
-                    <Typography>{participant.name}</Typography>
+                    <ParticipantLabel name={participant.name} emoji={participant.emoji} />
                     {byes.has(participant.id) && <Chip size="small" color="secondary" label="BYE" />}
                   </Box>
                 </ListItem>

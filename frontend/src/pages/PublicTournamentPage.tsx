@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Box, Card, CardContent, Chip, CircularProgress, Divider, Stack, Typography } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getPublicTournament } from '../api/tournaments';
-import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
+import { formatParticipantName, matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
 import { StatusChip } from '../components/StatusChip';
 import { BracketView } from '../components/BracketView';
 import { extractErrorMessage } from '../api/client';
@@ -60,13 +60,16 @@ export function PublicTournamentPage() {
                 Participants ({data.participants.length})
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {data.participants.map((participant) => (
-                  <Chip
-                    key={participant.id}
-                    label={participant.hasBye ? `${participant.name} · bye` : participant.name}
-                    variant="outlined"
-                  />
-                ))}
+                {data.participants.map((participant) => {
+                  const label = formatParticipantName(participant.name, participant.emoji);
+                  return (
+                    <Chip
+                      key={participant.id}
+                      label={participant.hasBye ? `${label} · bye` : label}
+                      variant="outlined"
+                    />
+                  );
+                })}
               </Box>
             </CardContent>
           </Card>

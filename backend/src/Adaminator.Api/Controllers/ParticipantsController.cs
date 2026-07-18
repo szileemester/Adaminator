@@ -31,9 +31,9 @@ public class ParticipantsController : ControllerBase
     }
 
     [HttpPut("{participantId:guid}")]
-    public async Task<ActionResult<ParticipantDto>> Rename(Guid tournamentId, Guid participantId, [FromBody] RenameParticipantRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<ParticipantDto>> Update(Guid tournamentId, Guid participantId, [FromBody] UpdateParticipantRequest request, CancellationToken cancellationToken)
     {
-        var participant = await _service.RenameAsync(tournamentId, participantId, request, cancellationToken);
+        var participant = await _service.UpdateAsync(tournamentId, participantId, request, cancellationToken);
         return Ok(participant);
     }
 

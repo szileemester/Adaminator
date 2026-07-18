@@ -11,26 +11,28 @@ internal static class BracketProjection
 {
     public static BracketDto Build(Tournament tournament)
     {
-        var names = tournament.Participants.ToDictionary(p => p.Id, p => p.Name);
+        // The whole participant, not just the name: every display site needs the emoji too, and one
+        // lookup threaded through beats two parallel dictionaries.
+        var roster = tournament.Participants.ToDictionary(p => p.Id);
 
         if (tournament.Type == TournamentType.DoubleElimination)
         {
-            return BuildDoubleElimination(tournament, names);
+            return BuildDoubleElimination(tournament, roster);
         }
 
         if (tournament.Type == TournamentType.RoundRobin)
         {
-            return BuildRoundRobin(tournament, names);
+            return BuildRoundRobin(tournament, roster);
         }
 
         if (tournament.Type == TournamentType.GroupStagePlayoff)
         {
-            return BuildGroupStagePlayoff(tournament, names);
+            return BuildGroupStagePlayoff(tournament, roster);
         }
 
         var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
         var totalRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
-        var rounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), names, tournament);
+        var rounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), roster, tournament);
 
         var thirdPlace = tournament.Matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
 
@@ -40,10 +42,10 @@ internal static class BracketProjection
             WinnerRounds: rounds,
             LoserRounds: Array.Empty<BracketRoundDto>(),
             GrandFinal: null,
-            ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, names, tournament),
+            ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, roster, tournament),
             ThirdPlacePodium: null,
             Standings: Array.Empty<StandingRowDto>(),
-            Placements: BuildSingleEliminationPlacements(winnerMatches, totalRounds, thirdPlace, names),
+            Placements: BuildSingleEliminationPlacements(winnerMatches, totalRounds, thirdPlace, roster),
             Groups: Array.Empty<GroupDto>(),
             CanStartPlayoffs: false,
             CanFinish: tournament.CanFinish);
@@ -59,13 +61,13 @@ internal static class BracketProjection
     /// fills in progressively as the tournament runs rather than waiting for it to finish.
     /// </summary>
     private static IReadOnlyList<PlacementGroupDto> BuildSingleEliminationPlacements(
-        List<Match> winnerMatches, int totalRounds, Match? thirdPlace, IReadOnlyDictionary<Guid, string> names)
+        List<Match> winnerMatches, int totalRounds, Match? thirdPlace, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var groups = new List<PlacementGroupDto>();
         var rank = 1;
 
         var final = winnerMatches.FirstOrDefault(m => m.Round == totalRounds);
-        AddPodium(groups, ref rank, final, names);
+        AddPodium(groups, ref rank, final, roster);
 
         if (totalRounds >= 2)
         {
@@ -77,12 +79,12 @@ internal static class BracketProjection
             {
                 if (thirdPlace is { IsDecided: true })
                 {
-                    groups.Add(new PlacementGroupDto(rank, rank, "3rd Place", new[] { ToSlot(thirdPlace.WinnerId, names)! }));
-                    groups.Add(new PlacementGroupDto(rank + 1, rank + 1, "4th Place", new[] { ToSlot(thirdPlace.LoserId, names)! }));
+                    groups.Add(new PlacementGroupDto(rank, rank, "3rd Place", new[] { ToSlot(thirdPlace.WinnerId, roster)! }));
+                    groups.Add(new PlacementGroupDto(rank + 1, rank + 1, "4th Place", new[] { ToSlot(thirdPlace.LoserId, roster)! }));
                 }
                 else
                 {
-                    groups.Add(new PlacementGroupDto(rank, rank + semifinalSize - 1, "Semifinalists", ToSlots(semifinalLosers, names)));
+                    groups.Add(new PlacementGroupDto(rank, rank + semifinalSize - 1, "Semifinalists", ToSlots(semifinalLosers, roster)));
                 }
             }
 
@@ -91,27 +93,27 @@ internal static class BracketProjection
 
         for (var r = totalRounds - 2; r >= 1; r--)
         {
-            AddRoundGroup(groups, ref rank, winnerMatches, r, $"Eliminated in {RoundTitle(r, totalRounds)}", names);
+            AddRoundGroup(groups, ref rank, winnerMatches, r, $"Eliminated in {RoundTitle(r, totalRounds)}", roster);
         }
 
         return groups;
     }
 
     /// <summary>Adds "Champion"/"Runner-up" for ranks 1-2 if <paramref name="decidingMatch"/> is decided, always advancing past both ranks either way.</summary>
-    private static void AddPodium(List<PlacementGroupDto> groups, ref int rank, Match? decidingMatch, IReadOnlyDictionary<Guid, string> names)
+    private static void AddPodium(List<PlacementGroupDto> groups, ref int rank, Match? decidingMatch, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var decided = decidingMatch?.IsDecided == true;
 
         if (decided)
         {
-            groups.Add(new PlacementGroupDto(rank, rank, "Champion", new[] { ToSlot(decidingMatch!.WinnerId, names)! }));
+            groups.Add(new PlacementGroupDto(rank, rank, "Champion", new[] { ToSlot(decidingMatch!.WinnerId, roster)! }));
         }
 
         rank++;
 
         if (decided)
         {
-            groups.Add(new PlacementGroupDto(rank, rank, "Runner-up", new[] { ToSlot(decidingMatch!.LoserId, names)! }));
+            groups.Add(new PlacementGroupDto(rank, rank, "Runner-up", new[] { ToSlot(decidingMatch!.LoserId, roster)! }));
         }
 
         rank++;
@@ -123,13 +125,13 @@ internal static class BracketProjection
     /// decided), and always advances <paramref name="rank"/> past the round regardless.
     /// </summary>
     private static void AddRoundGroup(
-        List<PlacementGroupDto> groups, ref int rank, List<Match> matches, int round, string label, IReadOnlyDictionary<Guid, string> names)
+        List<PlacementGroupDto> groups, ref int rank, List<Match> matches, int round, string label, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var roundSize = matches.Count(m => m.Round == round);
         var losers = DecidedLoserIds(matches, round);
         if (losers.Count > 0)
         {
-            groups.Add(new PlacementGroupDto(rank, rank + roundSize - 1, label, ToSlots(losers, names)));
+            groups.Add(new PlacementGroupDto(rank, rank + roundSize - 1, label, ToSlots(losers, roster)));
         }
 
         rank += roundSize;
@@ -143,10 +145,10 @@ internal static class BracketProjection
     /// <see cref="BracketDto.WinnerRounds"/> rather than adding a parallel field. Ranking comes from
     /// <see cref="BuildStandings"/> instead of a Final/Third-Place match.
     /// </summary>
-    private static BracketDto BuildRoundRobin(Tournament tournament, IReadOnlyDictionary<Guid, string> names)
+    private static BracketDto BuildRoundRobin(Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var matches = SegmentMatches(tournament, BracketSegment.RoundRobin);
-        var rounds = GroupIntoRounds(matches, PlainRoundTitle, names, tournament);
+        var rounds = GroupIntoRounds(matches, PlainRoundTitle, roster, tournament);
 
         return new BracketDto(
             tournament.Type,
@@ -156,7 +158,7 @@ internal static class BracketProjection
             GrandFinal: null,
             ThirdPlace: null,
             ThirdPlacePodium: null,
-            Standings: BuildStandings(matches, tournament.Participants, names),
+            Standings: BuildStandings(matches, tournament.Participants, roster),
             Placements: Array.Empty<PlacementGroupDto>(),
             Groups: Array.Empty<GroupDto>(),
             CanStartPlayoffs: false,
@@ -168,7 +170,7 @@ internal static class BracketProjection
     /// has been started it also projects the double-elimination playoff (reusing the Double Elimination
     /// projection pieces, since the playoff <em>is</em> a standard double elimination).
     /// </summary>
-    private static BracketDto BuildGroupStagePlayoff(Tournament tournament, IReadOnlyDictionary<Guid, string> names)
+    private static BracketDto BuildGroupStagePlayoff(Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var matchesByGroup = tournament.Matches
             .Where(m => m.Segment == BracketSegment.RoundRobin)
@@ -182,13 +184,13 @@ internal static class BracketProjection
 
             groups.Add(new GroupDto(
                 g,
-                GroupIntoRounds(groupMatches, PlainRoundTitle, names, tournament),
-                BuildStandings(groupMatches, participantsByGroup[g].ToList(), names)));
+                GroupIntoRounds(groupMatches, PlainRoundTitle, roster, tournament),
+                BuildStandings(groupMatches, participantsByGroup[g].ToList(), roster)));
         }
 
         // The playoff *is* a standard double elimination, so reuse that projection wholesale and just
         // layer the group stage on top. Before StartPlayoffs it simply projects empty playoff rounds.
-        return BuildDoubleElimination(tournament, names) with
+        return BuildDoubleElimination(tournament, roster) with
         {
             Groups = groups,
             CanStartPlayoffs = tournament.CanStartPlayoffs,
@@ -201,9 +203,13 @@ internal static class BracketProjection
     /// then maps to display rows with a 1-based rank.
     /// </summary>
     private static IReadOnlyList<StandingRowDto> BuildStandings(
-        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, string> names) =>
-        RoundRobinStandings.Rank(matches, participants, names)
-            .Select((row, i) => new StandingRowDto(i + 1, row.ParticipantId, names[row.ParticipantId], row.Played, row.Wins, row.Losses))
+        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, Participant> roster) =>
+        RoundRobinStandings.Rank(matches, participants, roster)
+            .Select((row, i) =>
+            {
+                var participant = roster[row.ParticipantId];
+                return new StandingRowDto(i + 1, row.ParticipantId, participant.Name, participant.Emoji, row.Played, row.Wins, row.Losses);
+            })
             .ToList();
 
     /// <summary>
@@ -212,28 +218,28 @@ internal static class BracketProjection
     /// (see <see cref="Adaminator.Domain.Brackets.DoubleEliminationBracket"/>) can eliminate every
     /// Loser Bracket match for very low participant counts, in which case there is no third place at all.
     /// </summary>
-    private static BracketDto BuildDoubleElimination(Tournament tournament, IReadOnlyDictionary<Guid, string> names)
+    private static BracketDto BuildDoubleElimination(Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
         var totalWinnerRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
-        var winnerRounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalWinnerRounds), names, tournament);
+        var winnerRounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalWinnerRounds), roster, tournament);
 
         var loserMatches = SegmentMatches(tournament, BracketSegment.Loser);
-        var loserRounds = GroupIntoRounds(loserMatches, PlainRoundTitle, names, tournament);
+        var loserRounds = GroupIntoRounds(loserMatches, PlainRoundTitle, roster, tournament);
 
         var grandFinal = tournament.Matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
-        var thirdPlacePodium = ToSlot(tournament.ThirdPlaceParticipantId, names);
+        var thirdPlacePodium = ToSlot(tournament.ThirdPlaceParticipantId, roster);
 
         return new BracketDto(
             tournament.Type,
             tournament.Status,
             winnerRounds,
             loserRounds,
-            grandFinal is null ? null : ToMatchDto(grandFinal, names, tournament),
+            grandFinal is null ? null : ToMatchDto(grandFinal, roster, tournament),
             ThirdPlace: null,
             thirdPlacePodium,
             Standings: Array.Empty<StandingRowDto>(),
-            Placements: BuildDoubleEliminationPlacements(grandFinal, thirdPlacePodium, loserMatches, names),
+            Placements: BuildDoubleEliminationPlacements(grandFinal, thirdPlacePodium, loserMatches, roster),
             Groups: Array.Empty<GroupDto>(),
             CanStartPlayoffs: false,
             CanFinish: tournament.CanFinish);
@@ -245,12 +251,12 @@ internal static class BracketProjection
     /// eliminated in (excluding the Loser Bracket Final, whose loser is already 3rd Place).
     /// </summary>
     private static IReadOnlyList<PlacementGroupDto> BuildDoubleEliminationPlacements(
-        Match? grandFinal, BracketSlotDto? thirdPlacePodium, List<Match> loserMatches, IReadOnlyDictionary<Guid, string> names)
+        Match? grandFinal, BracketSlotDto? thirdPlacePodium, List<Match> loserMatches, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var groups = new List<PlacementGroupDto>();
         var rank = 1;
 
-        AddPodium(groups, ref rank, grandFinal, names);
+        AddPodium(groups, ref rank, grandFinal, roster);
 
         if (thirdPlacePodium is not null)
         {
@@ -262,7 +268,7 @@ internal static class BracketProjection
         var lbFinalRound = loserMatches.Count == 0 ? 0 : loserMatches.Max(m => m.Round);
         for (var r = lbFinalRound - 1; r >= 1; r--)
         {
-            AddRoundGroup(groups, ref rank, loserMatches, r, $"Eliminated in Loser Bracket Round {r}", names);
+            AddRoundGroup(groups, ref rank, loserMatches, r, $"Eliminated in Loser Bracket Round {r}", roster);
         }
 
         return groups;
@@ -276,17 +282,17 @@ internal static class BracketProjection
             .ToList();
 
     private static IReadOnlyList<BracketRoundDto> GroupIntoRounds(
-        List<Match> matches, Func<int, string> title, IReadOnlyDictionary<Guid, string> names, Tournament tournament) =>
+        List<Match> matches, Func<int, string> title, IReadOnlyDictionary<Guid, Participant> roster, Tournament tournament) =>
         matches
             .GroupBy(m => m.Round)
             .OrderBy(g => g.Key)
             .Select(g => new BracketRoundDto(
                 g.Key,
                 title(g.Key),
-                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, names, tournament)).ToList()))
+                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, roster, tournament)).ToList()))
             .ToList();
 
-    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, string> names, Tournament tournament)
+    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, Participant> roster, Tournament tournament)
     {
         var entries = match.ScoreEntries
             .OrderBy(e => e.SequenceNumber)
@@ -301,8 +307,8 @@ internal static class BracketProjection
             match.Segment,
             match.Round,
             match.IndexInRound,
-            ToSlot(match.ParticipantAId, names),
-            ToSlot(match.ParticipantBId, names),
+            ToSlot(match.ParticipantAId, roster),
+            ToSlot(match.ParticipantBId, roster),
             match.Status,
             match.WinnerId,
             match.MatchFormat,
@@ -314,11 +320,22 @@ internal static class BracketProjection
             CanUndo: tournament.CanUndo(match.Id));
     }
 
-    private static BracketSlotDto? ToSlot(Guid? participantId, IReadOnlyDictionary<Guid, string> names) =>
-        participantId is null ? null : new BracketSlotDto(participantId.Value, names.GetValueOrDefault(participantId.Value, "?"));
+    private static BracketSlotDto? ToSlot(Guid? participantId, IReadOnlyDictionary<Guid, Participant> roster)
+    {
+        if (participantId is not { } id)
+        {
+            return null;
+        }
 
-    private static IReadOnlyList<BracketSlotDto> ToSlots(IEnumerable<Guid> participantIds, IReadOnlyDictionary<Guid, string> names) =>
-        participantIds.Select(id => ToSlot(id, names)!).ToList();
+        // An id with no roster entry shouldn't happen, but keep the pre-existing "?" fallback rather
+        // than throwing from a read-only projection.
+        return roster.TryGetValue(id, out var participant)
+            ? new BracketSlotDto(id, participant.Name, participant.Emoji)
+            : new BracketSlotDto(id, "?", null);
+    }
+
+    private static IReadOnlyList<BracketSlotDto> ToSlots(IEnumerable<Guid> participantIds, IReadOnlyDictionary<Guid, Participant> roster) =>
+        participantIds.Select(id => ToSlot(id, roster)!).ToList();
 
     /// <summary>Plain "Round N" title, used where rounds never get a Final/Semifinals-style name (Round Robin, the Loser Bracket).</summary>
     private static string PlainRoundTitle(int round) => $"Round {round}";

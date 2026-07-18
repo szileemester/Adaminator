@@ -18,11 +18,11 @@ public static class RoundRobinStandings
 {
     /// <summary>
     /// Ranks <paramref name="participants"/> by their record in <paramref name="matches"/>. Callers pass
-    /// their existing id-to-name lookup (used only as the final tiebreaker) rather than having one
+    /// their existing id-to-participant lookup (used only for the name tiebreaker) rather than having one
     /// rebuilt per call - the projection ranks once per group off a single tournament-wide map.
     /// </summary>
     public static List<RoundRobinStanding> Rank(
-        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, string> names)
+        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var wins = new Dictionary<Guid, int>();
         var losses = new Dictionary<Guid, int>();
@@ -42,7 +42,7 @@ public static class RoundRobinStandings
             .Select(p => new RoundRobinStanding(p.Id, wins.GetValueOrDefault(p.Id), losses.GetValueOrDefault(p.Id)))
             .OrderByDescending(r => r.Wins)
             .ThenBy(r => r.Losses)
-            .ThenBy(r => names[r.ParticipantId], StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => roster[r.ParticipantId].Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 }

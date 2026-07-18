@@ -18,7 +18,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { BracketMatch, MatchFormat, ScoreType } from '../api/types';
-import { matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
+import { formatParticipantName, matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
 import { completeMatch, forfeitMatch, saveMatchResult, undoMatch } from '../api/matches';
 import type { ScoreEntryInput } from '../api/matches';
 import { extractErrorMessage } from '../api/client';
@@ -205,8 +205,10 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
     onClose();
   };
 
-  const nameA = match.participantA?.name ?? 'TBD';
-  const nameB = match.participantB?.name ?? 'TBD';
+  // Emoji-prefixed strings rather than <ParticipantLabel>: several of these feed `label` props
+  // (TextField, ToggleButton) and the dialog title, which take a string, not JSX.
+  const nameA = match.participantA ? formatParticipantName(match.participantA.name, match.participantA.emoji) : 'TBD';
+  const nameB = match.participantB ? formatParticipantName(match.participantB.name, match.participantB.emoji) : 'TBD';
 
   return (
     <Dialog open onClose={handleClose} maxWidth="sm" fullWidth>

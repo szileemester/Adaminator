@@ -22,15 +22,18 @@ import {
   addParticipant,
   listParticipants,
   removeParticipant,
-  renameParticipant,
+  updateParticipant,
 } from '../api/tournaments';
 import type { Participant, TournamentType } from '../api/types';
 import { requiredByes } from '../api/types';
 import { extractErrorMessage } from '../api/client';
+import { EmojiPicker } from './EmojiPicker';
+import { ParticipantLabel } from './ParticipantLabel';
 
 export function ParticipantsSection({ tournamentId, tournamentType }: { tournamentId: string; tournamentType: TournamentType }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
+  const [emoji, setEmoji] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const { data: participants = [] } = useQuery({
@@ -44,9 +47,10 @@ export function ParticipantsSection({ tournamentId, tournamentType }: { tourname
   };
 
   const addMutation = useMutation({
-    mutationFn: (value: string) => addParticipant(tournamentId, value),
+    mutationFn: (input: { value: string; emoji: string | null }) => addParticipant(tournamentId, input.value, input.emoji),
     onSuccess: async () => {
       setName('');
+      setEmoji(null);
       await invalidate();
     },
     onError: (err) => setError(extractErrorMessage(err)),
@@ -58,8 +62,9 @@ export function ParticipantsSection({ tournamentId, tournamentType }: { tourname
     onError: (err) => setError(extractErrorMessage(err)),
   });
 
-  const renameMutation = useMutation({
-    mutationFn: (input: { id: string; value: string }) => renameParticipant(tournamentId, input.id, input.value),
+  const updateMutation = useMutation({
+    mutationFn: (input: { id: string; value: string; emoji: string | null }) =>
+      updateParticipant(tournamentId, input.id, input.value, input.emoji),
     onSuccess: invalidate,
     onError: (err) => setError(extractErrorMessage(err)),
   });
@@ -69,7 +74,7 @@ export function ParticipantsSection({ tournamentId, tournamentType }: { tourname
     setError(null);
     const trimmed = name.trim();
     if (trimmed) {
-      addMutation.mutate(trimmed);
+      addMutation.mutate({ value: trimmed, emoji });
     }
   };
 
@@ -91,7 +96,7 @@ export function ParticipantsSection({ tournamentId, tournamentType }: { tourname
           </Alert>
         )}
 
-        <Box component="form" onSubmit={handleAdd} sx={{ display: 'flex', gap: 1, mb: 1 }}>
+        <Box component="form" onSubmit={handleAdd} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <TextField
             size="small"
             label="Participant name"
@@ -99,10 +104,14 @@ export function ParticipantsSection({ tournamentId, tournamentType }: { tourname
             onChange={(e) => setName(e.target.value)}
             fullWidth
           />
+          <EmojiPicker value={emoji} onChange={setEmoji} disabled={addMutation.isPending} />
           <Button type="submit" variant="contained" disabled={addMutation.isPending || name.trim().length === 0}>
             Add
           </Button>
         </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          Pick an optional emoji next to the name. It's permanent once saved.
+        </Typography>
 
         {count < 2 && (
           <Typography variant="body2" color="text.secondary">
@@ -120,7 +129,7 @@ export function ParticipantsSection({ tournamentId, tournamentType }: { tourname
             <ParticipantRow
               key={participant.id}
               participant={participant}
-              onRename={(value) => renameMutation.mutate({ id: participant.id, value })}
+              onSave={(value, chosenEmoji) => updateMutation.mutate({ id: participant.id, value, emoji: chosenEmoji })}
               onRemove={() => removeMutation.mutate(participant.id)}
             />
           ))}
@@ -138,20 +147,27 @@ export function ParticipantsSection({ tournamentId, tournamentType }: { tourname
 
 function ParticipantRow({
   participant,
-  onRename,
+  onSave,
   onRemove,
 }: {
   participant: Participant;
-  onRename: (value: string) => void;
+  onSave: (value: string, emoji: string | null) => void;
   onRemove: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(participant.name);
+  const [emoji, setEmoji] = useState<string | null>(participant.emoji);
+
+  const cancel = () => {
+    setValue(participant.name);
+    setEmoji(participant.emoji);
+    setEditing(false);
+  };
 
   const commit = () => {
     const trimmed = value.trim();
-    if (trimmed && trimmed !== participant.name) {
-      onRename(trimmed);
+    if (trimmed && (trimmed !== participant.name || emoji !== participant.emoji)) {
+      onSave(trimmed, emoji);
     }
     setEditing(false);
   };
@@ -162,23 +178,16 @@ function ParticipantRow({
       secondaryAction={
         editing ? (
           <>
-            <IconButton size="small" onClick={commit} aria-label="Save name">
+            <IconButton size="small" onClick={commit} aria-label="Save">
               <CheckIcon fontSize="small" />
             </IconButton>
-            <IconButton
-              size="small"
-              onClick={() => {
-                setValue(participant.name);
-                setEditing(false);
-              }}
-              aria-label="Cancel"
-            >
+            <IconButton size="small" onClick={cancel} aria-label="Cancel">
               <CloseIcon fontSize="small" />
             </IconButton>
           </>
         ) : (
           <>
-            <IconButton size="small" onClick={() => setEditing(true)} aria-label="Rename">
+            <IconButton size="small" onClick={() => setEditing(true)} aria-label="Edit">
               <EditIcon fontSize="small" />
             </IconButton>
             <IconButton size="small" color="error" onClick={onRemove} aria-label="Remove">
@@ -189,16 +198,20 @@ function ParticipantRow({
       }
     >
       {editing ? (
-        <TextField
-          size="small"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && commit()}
-          autoFocus
-          sx={{ maxWidth: 260 }}
-        />
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <TextField
+            size="small"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && commit()}
+            autoFocus
+            sx={{ maxWidth: 260 }}
+          />
+          {/* Write-once: someone who already has an emoji can never change it, but someone who skipped it can still choose (once). */}
+          <EmojiPicker value={emoji} onChange={setEmoji} locked={participant.emoji !== null} />
+        </Stack>
       ) : (
-        <Typography>{participant.name}</Typography>
+        <ParticipantLabel name={participant.name} emoji={participant.emoji} />
       )}
     </ListItem>
   );

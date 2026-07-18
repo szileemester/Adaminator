@@ -146,13 +146,13 @@ public class GroupStagePlayoffMatchResultTests
 
         tournament.StartPlayoffs();
 
-        var names = tournament.Participants.ToDictionary(p => p.Id, p => p.Name);
+        var roster = tournament.Participants.ToDictionary(p => p.Id);
         var expectedUpper = new HashSet<Guid>();
         for (var g = 0; g < 2; g++)
         {
             var participants = tournament.Participants.Where(p => p.GroupIndex == g).ToList();
             var groupMatches = tournament.Matches.Where(m => m.Segment == BracketSegment.RoundRobin && m.GroupIndex == g);
-            var ranked = RoundRobinStandings.Rank(groupMatches, participants, names);
+            var ranked = RoundRobinStandings.Rank(groupMatches, participants, roster);
             expectedUpper.Add(ranked[0].ParticipantId);
             expectedUpper.Add(ranked[1].ParticipantId);
         }

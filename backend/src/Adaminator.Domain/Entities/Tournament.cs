@@ -93,7 +93,7 @@ public class Tournament
 
     // ---- Participant management (Planned only) ----
 
-    public Participant AddParticipant(string name)
+    public Participant AddParticipant(string name, string? emoji = null)
     {
         EnsurePlanned("changed");
         if (_participants.Count >= MaxParticipants)
@@ -104,7 +104,7 @@ public class Tournament
         var trimmed = (name ?? string.Empty).Trim();
         EnsureUniqueName(trimmed, excludeId: null);
 
-        var participant = Participant.Create(Id, trimmed);
+        var participant = Participant.Create(Id, trimmed, emoji);
         _participants.Add(participant);
         ResetSeeding();
         return participant;
@@ -117,6 +117,16 @@ public class Tournament
         var trimmed = (name ?? string.Empty).Trim();
         EnsureUniqueName(trimmed, excludeId: participantId);
         participant.Rename(trimmed);
+    }
+
+    /// <summary>
+    /// Chooses a participant's emoji. Write-once (see <see cref="Participant.SetEmoji"/>) and, like every
+    /// other roster edit, only while the tournament is still Planned.
+    /// </summary>
+    public void SetParticipantEmoji(Guid participantId, string? emoji)
+    {
+        EnsurePlanned("changed");
+        FindParticipant(participantId).SetEmoji(emoji);
     }
 
     public void RemoveParticipant(Guid participantId)
@@ -318,13 +328,13 @@ public class Tournament
             throw new DomainException("Every group match must be decided before starting the playoff.");
         }
 
-        var names = _participants.ToDictionary(p => p.Id, p => p.Name);
+        var roster = _participants.ToDictionary(p => p.Id);
         var groupStandings = new List<IReadOnlyList<Guid>>(GroupCount);
         for (var g = 0; g < GroupCount; g++)
         {
             var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
             var groupMatches = GroupMatches.Where(m => m.GroupIndex == g);
-            var ranked = RoundRobinStandings.Rank(groupMatches, groupParticipants, names).Select(r => r.ParticipantId).ToList();
+            var ranked = RoundRobinStandings.Rank(groupMatches, groupParticipants, roster).Select(r => r.ParticipantId).ToList();
             groupStandings.Add(ranked);
         }
 

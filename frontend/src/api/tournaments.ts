@@ -49,13 +49,19 @@ export async function listParticipants(tournamentId: string): Promise<Participan
   return data;
 }
 
-export async function addParticipant(tournamentId: string, name: string): Promise<Participant> {
-  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/participants`, { name });
+export async function addParticipant(tournamentId: string, name: string, emoji: string | null = null): Promise<Participant> {
+  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/participants`, { name, emoji });
   return data;
 }
 
-export async function renameParticipant(tournamentId: string, participantId: string, name: string): Promise<Participant> {
-  const { data } = await apiClient.put(`/api/tournaments/${tournamentId}/participants/${participantId}`, { name });
+/** Carries the emoji alongside the name; re-sending the stored one is a no-op server-side, changing it is rejected. */
+export async function updateParticipant(
+  tournamentId: string,
+  participantId: string,
+  name: string,
+  emoji: string | null = null,
+): Promise<Participant> {
+  const { data } = await apiClient.put(`/api/tournaments/${tournamentId}/participants/${participantId}`, { name, emoji });
   return data;
 }
 

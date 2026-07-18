@@ -7,6 +7,7 @@ import { drawGroups, listParticipants, startTournament } from '../api/tournament
 import { groupLabel } from '../api/types';
 import { extractErrorMessage } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ParticipantLabel } from './ParticipantLabel';
 
 /** Group Stage + Playoff pre-start flow: random group draw (redraw-able) then start. */
 export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: string; groupCount: number }) {
@@ -94,9 +95,7 @@ export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: stri
                     </Typography>
                     <Stack spacing={0.5}>
                       {members.map((participant) => (
-                        <Typography key={participant.id} variant="body2">
-                          {participant.name}
-                        </Typography>
+                        <ParticipantLabel key={participant.id} name={participant.name} emoji={participant.emoji} />
                       ))}
                     </Stack>
                   </CardContent>

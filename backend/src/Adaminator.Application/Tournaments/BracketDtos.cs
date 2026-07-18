@@ -2,7 +2,7 @@ using Adaminator.Domain.Enums;
 
 namespace Adaminator.Application.Tournaments;
 
-public record BracketSlotDto(Guid ParticipantId, string Name);
+public record BracketSlotDto(Guid ParticipantId, string Name, string? Emoji);
 
 public record BracketMatchDto(
     Guid Id,
@@ -24,7 +24,7 @@ public record BracketMatchDto(
 public record BracketRoundDto(int Round, string Title, IReadOnlyList<BracketMatchDto> Matches);
 
 /// <summary>Round Robin only: a participant's ranked won-loss record, sorted wins desc, losses asc, name asc.</summary>
-public record StandingRowDto(int Rank, Guid ParticipantId, string Name, int Played, int Wins, int Losses);
+public record StandingRowDto(int Rank, Guid ParticipantId, string Name, string? Emoji, int Played, int Wins, int Losses);
 
 /// <summary>
 /// Single/Double Elimination only: one rung of the final-placements leaderboard - "Champion",

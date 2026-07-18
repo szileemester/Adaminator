@@ -33,6 +33,8 @@ export type BracketSegment = 'Winner' | 'Loser' | 'GrandFinal' | 'ThirdPlace' | 
 export interface Participant {
   id: string;
   name: string;
+  /** Optional display emoji. Null until chosen, and write-once thereafter (the API rejects a change). */
+  emoji: string | null;
   seed: number;
   hasBye: boolean;
   /** Group Stage + Playoff only: the group this participant was drawn into; null otherwise. */
@@ -42,6 +44,7 @@ export interface Participant {
 export interface BracketSlot {
   participantId: string;
   name: string;
+  emoji: string | null;
 }
 
 export type ScoreType = 'WinnerOnly' | 'Games' | 'Points' | 'Sets';
@@ -81,6 +84,7 @@ export interface StandingRow {
   rank: number;
   participantId: string;
   name: string;
+  emoji: string | null;
   played: number;
   wins: number;
   losses: number;
@@ -197,6 +201,11 @@ export const tournamentStatusLabels: Record<TournamentStatus, string> = {
 /** Display name for a 0-based group index: "Group A", "Group B", … */
 export function groupLabel(groupIndex: number): string {
   return `Group ${String.fromCharCode(65 + groupIndex)}`;
+}
+
+/** Name prefixed with the emoji, for the few places that take a plain string instead of JSX (Chip/TextField labels, dialog titles). */
+export function formatParticipantName(name: string, emoji: string | null | undefined): string {
+  return emoji ? `${emoji} ${name}` : name;
 }
 
 export const scoreTypeLabels: Record<ScoreType, string> = {

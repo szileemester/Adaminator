@@ -22,15 +22,17 @@ public class ParticipantService
     public async Task<ParticipantDto> AddAsync(Guid tournamentId, AddParticipantRequest request, CancellationToken cancellationToken = default)
     {
         var tournament = await LoadAsync(tournamentId, cancellationToken);
-        var participant = tournament.AddParticipant(request.Name);
+        var participant = tournament.AddParticipant(request.Name, request.Emoji);
         await _repository.SaveChangesAsync(cancellationToken);
         return participant.ToDto();
     }
 
-    public async Task<ParticipantDto> RenameAsync(Guid tournamentId, Guid participantId, RenameParticipantRequest request, CancellationToken cancellationToken = default)
+    public async Task<ParticipantDto> UpdateAsync(Guid tournamentId, Guid participantId, UpdateParticipantRequest request, CancellationToken cancellationToken = default)
     {
         var tournament = await LoadAsync(tournamentId, cancellationToken);
         tournament.RenameParticipant(participantId, request.Name);
+        // Setting the emoji it already has is a no-op, so a plain rename passes straight through.
+        tournament.SetParticipantEmoji(participantId, request.Emoji);
         await _repository.SaveChangesAsync(cancellationToken);
         return tournament.Participants.First(p => p.Id == participantId).ToDto();
     }

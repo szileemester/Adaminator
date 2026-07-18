@@ -18,6 +18,7 @@ import {
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import type { Bracket, BracketMatch, BracketRound, BracketSlot, PlacementGroup, StandingRow } from '../api/types';
 import { groupLabel } from '../api/types';
+import { ParticipantLabel } from './ParticipantLabel';
 import { MatchResultDialog } from './MatchResultDialog';
 
 const RANK_COLORS: Record<number, { trophy: string; bg: string }> = {
@@ -746,9 +747,7 @@ function SlotRow({
         ...rowSx,
       }}
     >
-      <Typography variant="body2" noWrap sx={textSx}>
-        {slot ? slot.name : 'TBD'}
-      </Typography>
+      <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} sx={textSx} />
       {isWinner && <Chip size="small" color="success" label="W" />}
     </Box>
   );
@@ -813,9 +812,9 @@ function GroupMatchRow({
       <TableCell
         onMouseEnter={slot ? () => onHover(slot.participantId) : undefined}
         onMouseLeave={slot ? () => onHover(null) : undefined}
-        sx={{ ...textSx, ...rowSx }}
+        sx={rowSx}
       >
-        {slot ? slot.name : 'TBD'}
+        <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} sx={textSx} />
       </TableCell>
     );
   };
@@ -910,7 +909,9 @@ function StandingsTable({
                       <PlaceCell rankStart={row.rank} rankEnd={row.rank} />
                     )}
                   </TableCell>
-                  <TableCell sx={{ fontWeight: isHovered ? 700 : 400 }}>{row.name}</TableCell>
+                  <TableCell>
+                    <ParticipantLabel name={row.name} emoji={row.emoji} sx={{ fontWeight: isHovered ? 700 : 400 }} />
+                  </TableCell>
                   <TableCell align="right">{row.played}</TableCell>
                   <TableCell align="right">{row.wins}</TableCell>
                   <TableCell align="right">{row.losses}</TableCell>
@@ -972,9 +973,11 @@ function PlacementsList({
                             boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
                           }}
                         >
-                          <Typography variant="body2" sx={{ fontWeight: isHovered ? 700 : 400 }}>
-                            {participant.name}
-                          </Typography>
+                          <ParticipantLabel
+                            name={participant.name}
+                            emoji={participant.emoji}
+                            sx={{ fontWeight: isHovered ? 700 : 400 }}
+                          />
                         </Box>
                       );
                     })}

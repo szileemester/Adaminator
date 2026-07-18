@@ -18,6 +18,9 @@ public class ParticipantConfiguration : IEntityTypeConfiguration<Participant>
             .IsRequired()
             .HasMaxLength(Participant.NameMaxLength);
 
+        // Optional display emoji; null until the participant picks one.
+        builder.Property(p => p.Emoji).HasMaxLength(Participant.EmojiMaxLength);
+
         builder.Property(p => p.Seed).IsRequired();
         builder.Property(p => p.HasBye).IsRequired();
 
