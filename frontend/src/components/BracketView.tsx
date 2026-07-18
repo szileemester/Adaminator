@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   Box,
   Chip,
@@ -314,23 +314,19 @@ function GroupStagePlayoffView({
       </Tabs>
 
       {tab === 0 && (
-        <Box sx={{ overflowX: 'auto' }}>
-          <Stack spacing={4}>
-            {bracket.groups.map((group) => (
-              <Stack key={group.groupIndex} spacing={1}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  {groupLabel(group.groupIndex)}
-                </Typography>
-                <Box sx={{ overflowX: 'auto' }}>
-                  <Stack direction="row" spacing={3} sx={{ alignItems: 'stretch', minWidth: 'min-content' }}>
-                    <RoundColumns rounds={group.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
-                  </Stack>
-                </Box>
+        <Stack spacing={4}>
+          {bracket.groups.map((group) => (
+            <Stack key={group.groupIndex} spacing={1}>
+              <Typography variant="subtitle2" color="text.secondary">
+                {groupLabel(group.groupIndex)}
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, alignItems: 'start' }}>
+                <GroupMatchesTable rounds={group.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
                 <StandingsTable standings={group.standings} hoveredId={hoveredId} onHover={onHover} />
-              </Stack>
-            ))}
-          </Stack>
-        </Box>
+              </Box>
+            </Stack>
+          ))}
+        </Stack>
       )}
 
       {tab === 1 &&
@@ -723,6 +719,107 @@ function SlotRow({
       </Typography>
       {isWinner && <Chip size="small" color="success" label="W" />}
     </Box>
+  );
+}
+
+/** A group's schedule as one table - a header row per round, then one row per match with both participants side by side. */
+function GroupMatchesTable({
+  rounds,
+  onSelect,
+  hoveredId,
+  onHover,
+}: {
+  rounds: BracketRound[];
+  onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2" color="text.secondary">
+        Matches
+      </Typography>
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableBody>
+            {rounds.map((round) => (
+              <Fragment key={round.round}>
+                <TableRow>
+                  <TableCell colSpan={3} sx={{ bgcolor: 'action.hover', fontWeight: 600, py: 0.5 }}>
+                    {round.title}
+                  </TableCell>
+                </TableRow>
+                {round.matches.map((match) => (
+                  <GroupMatchRow key={match.id} match={match} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+                ))}
+              </Fragment>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
+  );
+}
+
+function GroupMatchRow({
+  match,
+  onSelect,
+  hoveredId,
+  onHover,
+}: {
+  match: BracketMatch;
+  onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
+  const actionable = Boolean(onSelect) && match.participantA != null && match.participantB != null;
+  const isDecided = match.status === 'Completed' || match.status === 'Forfeit';
+
+  const nameCell = (slot: BracketSlot | null) => {
+    const isWinner = slot != null && match.winnerId === slot.participantId;
+    const isHovered = slot != null && slot.participantId === hoveredId;
+    return (
+      <TableCell
+        onMouseEnter={slot ? () => onHover(slot.participantId) : undefined}
+        onMouseLeave={slot ? () => onHover(null) : undefined}
+        sx={{
+          fontWeight: isWinner || isHovered ? 700 : 400,
+          color: slot ? 'text.primary' : 'text.disabled',
+          bgcolor: isWinner ? 'rgba(63,185,80,0.15)' : 'transparent',
+          boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
+        }}
+      >
+        {slot ? slot.name : 'TBD'}
+      </TableCell>
+    );
+  };
+
+  return (
+    <TableRow onClick={actionable ? () => onSelect!(match.id) : undefined} sx={{ cursor: actionable ? 'pointer' : 'default' }}>
+      {nameCell(match.participantA)}
+      <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+        {isDecided ? (
+          <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'center', alignItems: 'center' }}>
+            <Typography variant="body2" component="span">
+              {match.aggregateScoreA} – {match.aggregateScoreB}
+            </Typography>
+            {match.status === 'Forfeit' && (
+              <Chip
+                size="small"
+                color="warning"
+                label="FF"
+                sx={{ height: 18, fontSize: '0.65rem', '& .MuiChip-label': { px: 0.75 } }}
+              />
+            )}
+          </Stack>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            vs
+          </Typography>
+        )}
+      </TableCell>
+      {nameCell(match.participantB)}
+    </TableRow>
   );
 }
 
