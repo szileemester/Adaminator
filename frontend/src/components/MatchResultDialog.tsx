@@ -168,8 +168,11 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   const busy =
     saveMutation.isPending || completeMutation.isPending || forfeitMutation.isPending || undoMutation.isPending;
 
+  // Changing game `index` clears every game after it - their results were only meaningful given the
+  // history leading up to them, and that history just changed (e.g. edit game 3 of an A,A,B,A run and
+  // game 4's stale "A" would otherwise survive even though the decisive game is now earlier).
   const updateEntry = (index: number, patch: Partial<GameSlot>) => {
-    setEntries((prev) => prev.map((slot, i) => (i === index ? { ...slot, ...patch } : slot)));
+    setEntries((prev) => prev.map((slot, i) => (i < index ? slot : i === index ? { ...slot, ...patch } : blankSlot())));
     setDirty(true);
   };
 
