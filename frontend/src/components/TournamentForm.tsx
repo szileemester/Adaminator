@@ -106,9 +106,15 @@ export function TournamentForm({
 
   return (
     <form onSubmit={submit} noValidate>
-      {/* Two columns on md+ so short controls (Name, Type, format/score pickers) don't stretch
-          across the whole card - Date/Notes/buttons stay full width via gridColumn: '1 / -1'. */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
+      {/*
+        Two columns on md+ so short controls (Name, Type, format/score pickers) don't stretch across
+        the whole card - Date/Notes/buttons stay full width via gridColumn: '1 / -1'.
+        gridAutoFlow: 'dense' matters here: pinning Third place to column 2 (the last column)
+        advances the browser's auto-placement cursor past the row's end, which wraps to the *next*
+        row before Date's auto-placed search even starts - sparse packing (the grid default) never
+        looks backward to fill the column-1 gap that leaves in Third place's row. Dense packing does.
+      */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gridAutoFlow: 'dense', gap: 3 }}>
         <TextField
           label="Name"
           required
