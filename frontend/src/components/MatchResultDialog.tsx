@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -8,7 +8,6 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
-  IconButton,
   InputLabel,
   MenuItem,
   Select,
@@ -18,8 +17,6 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
 import type { BracketMatch, MatchFormat, ScoreType } from '../api/types';
 import { matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
 import { completeMatch, forfeitMatch, saveMatchResult, undoMatch } from '../api/matches';
@@ -29,6 +26,22 @@ import { ConfirmDialog } from './ConfirmDialog';
 
 const MATCH_FORMATS: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
 const SCORE_TYPES: ScoreType[] = ['Games', 'Sets', 'Points', 'WinnerOnly'];
+
+/** One game slot's in-progress state - `participantAWon: null` means "not yet decided", distinct from the boolean the API wire format requires once a game is actually played. */
+interface GameSlot {
+  scoreA: number | null;
+  scoreB: number | null;
+  participantAWon: boolean | null;
+}
+
+const blankSlot = (): GameSlot => ({ scoreA: null, scoreB: null, participantAWon: null });
+
+function initEntries(existing: BracketMatch['entries'], maxGames: number): GameSlot[] {
+  return Array.from({ length: maxGames }, (_, i) => {
+    const entry = existing[i];
+    return entry ? { scoreA: entry.scoreA, scoreB: entry.scoreB, participantAWon: entry.participantAWon } : blankSlot();
+  });
+}
 
 interface MatchResultDialogProps {
   tournamentId: string;
@@ -41,10 +54,11 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   const isDecided = match.status === 'Completed' || match.status === 'Forfeit';
 
   const [matchFormat, setMatchFormat] = useState<MatchFormat>(match.matchFormat);
-  const [scoreType, setScoreType] = useState<ScoreType>(match.scoreType ?? 'Games');
-  const [entries, setEntries] = useState<ScoreEntryInput[]>(
-    match.entries.map((e) => ({ scoreA: e.scoreA, scoreB: e.scoreB, participantAWon: e.participantAWon })),
-  );
+  // Null until the admin picks one explicitly - a fresh match has no scoreType on the wire either
+  // (Match.ScoreType is only set once a result is first saved), so there is no sensible default to
+  // silently preselect here.
+  const [scoreType, setScoreType] = useState<ScoreType | null>(match.scoreType);
+  const [entries, setEntries] = useState<GameSlot[]>(() => initEntries(match.entries, matchFormatGameCount(matchFormat)));
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forfeitWinnerId, setForfeitWinnerId] = useState<string | null>(null);
@@ -52,14 +66,58 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
 
   const maxGames = matchFormatGameCount(matchFormat);
   const required = requiredWins(matchFormat);
-  const winsA = entries.filter((e) => e.participantAWon).length;
-  const winsB = entries.length - winsA;
-  const isDecisive = winsA >= required || winsB >= required;
+
+  // Resize the fixed slot list when the format changes (e.g. Bo5 -> Bo3 drops the trailing slots),
+  // keeping whatever was already entered in the slots that still exist.
+  useEffect(() => {
+    setEntries((prev) => {
+      if (prev.length === maxGames) {
+        return prev;
+      }
+
+      const next = prev.slice(0, maxGames);
+      while (next.length < maxGames) {
+        next.push(blankSlot());
+      }
+
+      return next;
+    });
+  }, [maxGames]);
+
+  const isFilled = (slot: GameSlot) =>
+    scoreType === 'Points' ? slot.scoreA != null && slot.scoreB != null : slot.participantAWon != null;
+
+  // Slots are filled strictly in order, so the first not-yet-filled slot is the one boundary that
+  // matters - everything before it is played, everything from it onward isn't reachable yet.
+  let filledCount = 0;
+  while (filledCount < entries.length && isFilled(entries[filledCount])) {
+    filledCount++;
+  }
+
+  const playedWinsA = entries.slice(0, filledCount).filter((e) => e.participantAWon === true).length;
+  const playedWinsB = filledCount - playedWinsA;
+  const isDecisive = playedWinsA >= required || playedWinsB >= required;
+  // One panel enabled at a time: the played ones, plus exactly one more to play next - unless the
+  // match is already decided, in which case no further panel is needed.
+  const enabledCount = isDecisive ? filledCount : Math.min(filledCount + 1, maxGames);
 
   const invalidateBracket = () => queryClient.invalidateQueries({ queryKey: ['bracket', tournamentId] });
 
+  const playedEntries = (): ScoreEntryInput[] =>
+    entries.slice(0, filledCount).map((slot) => ({
+      scoreA: slot.scoreA,
+      scoreB: slot.scoreB,
+      participantAWon: slot.participantAWon ?? false, // guaranteed non-null: every slot before filledCount passed isFilled
+    }));
+
   const saveMutation = useMutation({
-    mutationFn: () => saveMatchResult(tournamentId, match.id, { matchFormat, scoreType, entries }),
+    mutationFn: () => {
+      if (!scoreType) {
+        throw new Error('Choose a score type first.');
+      }
+
+      return saveMatchResult(tournamentId, match.id, { matchFormat, scoreType, entries: playedEntries() });
+    },
     onSuccess: async () => {
       setError(null);
       setDirty(false);
@@ -69,7 +127,13 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   });
 
   const completeMutation = useMutation({
-    mutationFn: () => completeMatch(tournamentId, match.id, { matchFormat, scoreType, entries }),
+    mutationFn: () => {
+      if (!scoreType) {
+        throw new Error('Choose a score type first.');
+      }
+
+      return completeMatch(tournamentId, match.id, { matchFormat, scoreType, entries: playedEntries() });
+    },
     onSuccess: async () => {
       await invalidateBracket();
       onClose();
@@ -104,19 +168,8 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   const busy =
     saveMutation.isPending || completeMutation.isPending || forfeitMutation.isPending || undoMutation.isPending;
 
-  const updateEntry = (index: number, patch: Partial<ScoreEntryInput>) => {
-    setEntries((prev) => prev.map((e, i) => (i === index ? { ...e, ...patch } : e)));
-    setDirty(true);
-  };
-
-  const addEntry = () => {
-    if (entries.length >= maxGames) return;
-    setEntries((prev) => [...prev, { scoreA: null, scoreB: null, participantAWon: true }]);
-    setDirty(true);
-  };
-
-  const removeEntry = (index: number) => {
-    setEntries((prev) => prev.filter((_, i) => i !== index));
+  const updateEntry = (index: number, patch: Partial<GameSlot>) => {
+    setEntries((prev) => prev.map((slot, i) => (i === index ? { ...slot, ...patch } : slot)));
     setDirty(true);
   };
 
@@ -178,16 +231,22 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                   </Select>
                 </FormControl>
                 <FormControl fullWidth size="small">
-                  <InputLabel id="score-type-label">Score type</InputLabel>
+                  <InputLabel id="score-type-label" shrink>
+                    Score type
+                  </InputLabel>
                   <Select
                     labelId="score-type-label"
                     label="Score type"
-                    value={scoreType}
+                    displayEmpty
+                    value={scoreType ?? ''}
                     onChange={(e) => {
                       setScoreType(e.target.value as ScoreType);
                       setDirty(true);
                     }}
                   >
+                    <MenuItem value="" disabled>
+                      <em>Select…</em>
+                    </MenuItem>
                     {SCORE_TYPES.map((type) => (
                       <MenuItem key={type} value={type} disabled={type === 'WinnerOnly' && matchFormat !== 'Bo1'}>
                         {scoreTypeLabels[type]}
@@ -197,79 +256,84 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                 </FormControl>
               </Stack>
 
-              <Stack spacing={1}>
-                {entries.map((entry, index) => (
-                  <Stack key={index} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                    <Typography variant="body2" sx={{ minWidth: 56 }}>
-                      Game {index + 1}
-                    </Typography>
-                    {scoreType === 'Points' ? (
-                      <>
-                        <TextField
-                          size="small"
-                          type="number"
-                          label={nameA}
-                          value={entry.scoreA ?? ''}
-                          sx={{ width: 90 }}
-                          slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(e) => {
-                            const scoreA = e.target.value === '' ? null : Number(e.target.value);
-                            const { scoreB } = entry;
-                            updateEntry(index, {
-                              scoreA,
-                              participantAWon: scoreA != null && scoreB != null ? scoreA > scoreB : entry.participantAWon,
-                            });
-                          }}
-                        />
-                        <TextField
-                          size="small"
-                          type="number"
-                          label={nameB}
-                          value={entry.scoreB ?? ''}
-                          sx={{ width: 90 }}
-                          slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(e) => {
-                            const scoreB = e.target.value === '' ? null : Number(e.target.value);
-                            const { scoreA } = entry;
-                            updateEntry(index, {
-                              scoreB,
-                              participantAWon: scoreA != null && scoreB != null ? scoreA > scoreB : entry.participantAWon,
-                            });
-                          }}
-                        />
-                      </>
-                    ) : (
-                      <ToggleButtonGroup
-                        size="small"
-                        exclusive
-                        value={entry.participantAWon}
-                        onChange={(_, value) => value !== null && updateEntry(index, { participantAWon: value })}
-                      >
-                        <ToggleButton value={true}>{nameA} won</ToggleButton>
-                        <ToggleButton value={false}>{nameB} won</ToggleButton>
-                      </ToggleButtonGroup>
-                    )}
-                    <IconButton size="small" onClick={() => removeEntry(index)} aria-label="Remove game">
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                ))}
-                <Button
-                  size="small"
-                  startIcon={<AddIcon />}
-                  onClick={addEntry}
-                  disabled={entries.length >= maxGames}
-                  sx={{ alignSelf: 'flex-start' }}
-                >
-                  Add game
-                </Button>
-              </Stack>
+              {scoreType == null ? (
+                <Typography variant="body2" color="text.secondary">
+                  Choose a score type to enter results.
+                </Typography>
+              ) : (
+                <Stack spacing={1}>
+                  {entries.map((slot, index) => {
+                    const enabled = index < enabledCount;
+                    return (
+                      <Stack key={index} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <Typography variant="body2" color={enabled ? 'text.primary' : 'text.disabled'} sx={{ minWidth: 56 }}>
+                          Game {index + 1}
+                        </Typography>
+                        {scoreType === 'Points' ? (
+                          <>
+                            <TextField
+                              size="small"
+                              type="number"
+                              label={nameA}
+                              value={slot.scoreA ?? ''}
+                              disabled={!enabled}
+                              sx={{ width: 90 }}
+                              slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => {
+                                const scoreA = e.target.value === '' ? null : Number(e.target.value);
+                                const { scoreB } = slot;
+                                updateEntry(index, {
+                                  scoreA,
+                                  participantAWon: scoreA != null && scoreB != null ? scoreA > scoreB : slot.participantAWon,
+                                });
+                              }}
+                            />
+                            <TextField
+                              size="small"
+                              type="number"
+                              label={nameB}
+                              value={slot.scoreB ?? ''}
+                              disabled={!enabled}
+                              sx={{ width: 90 }}
+                              slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => {
+                                const scoreB = e.target.value === '' ? null : Number(e.target.value);
+                                const { scoreA } = slot;
+                                updateEntry(index, {
+                                  scoreB,
+                                  participantAWon: scoreA != null && scoreB != null ? scoreA > scoreB : slot.participantAWon,
+                                });
+                              }}
+                            />
+                          </>
+                        ) : (
+                          <ToggleButtonGroup
+                            size="small"
+                            exclusive
+                            value={slot.participantAWon}
+                            onChange={(_, value) => updateEntry(index, { participantAWon: value })}
+                          >
+                            <ToggleButton value={true} disabled={!enabled}>
+                              {nameA} won
+                            </ToggleButton>
+                            <ToggleButton value={false} disabled={!enabled}>
+                              {nameB} won
+                            </ToggleButton>
+                          </ToggleButtonGroup>
+                        )}
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              )}
 
-              <Typography variant="body2" color="text.secondary">
-                Aggregate: {winsA} – {winsB} (needs {required} to win)
-              </Typography>
+              {scoreType != null && (
+                <Typography variant="body2" color="text.secondary">
+                  Aggregate: {playedWinsA} – {playedWinsB} (needs {required} to win)
+                </Typography>
+              )}
 
               {match.participantA && match.participantB && (
                 <Stack direction="row" spacing={1}>
@@ -300,10 +364,10 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
             <Button onClick={handleClose} disabled={busy}>
               Cancel
             </Button>
-            <Button onClick={() => saveMutation.mutate()} disabled={busy}>
+            <Button onClick={() => saveMutation.mutate()} disabled={busy || scoreType == null}>
               Save
             </Button>
-            <Button variant="contained" onClick={() => completeMutation.mutate()} disabled={busy || !isDecisive}>
+            <Button variant="contained" onClick={() => completeMutation.mutate()} disabled={busy || scoreType == null || !isDecisive}>
               Complete
             </Button>
           </>
