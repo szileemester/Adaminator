@@ -64,6 +64,8 @@ const CONNECTOR_WIDTH = 40;
 const CONNECTOR_COLOR = 'rgba(255,255,255,0.2)';
 const EXTRA_MATCH_GAP = 32; // space between the last round's card and the extra match's label
 const EXTRA_LABEL_HEIGHT = 28; // reserved height for the extra match's label row
+const SECTION_HEADER_HEIGHT = 28; // reserved height for a playoff grid round-header row
+const SECTION_GAP = 48; // vertical space between the winner and loser bracket regions
 
 export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tournamentId?: string }) {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -113,7 +115,7 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
       {tab === 0 ? (
         <Box sx={{ overflowX: 'auto' }}>
           {bracket.type === 'DoubleElimination' ? (
-            <PlayoffBrackets bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
+            <PlayoffGrid bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
           ) : isRoundRobin ? (
             <Stack direction="row" spacing={3} sx={{ alignItems: 'stretch', minWidth: 'min-content' }}>
               <RoundColumns rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
@@ -139,8 +141,30 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
   );
 }
 
-/** Winner Bracket + Loser Bracket + Grand Final - shared by Double Elimination and the Group Stage + Playoff playoff. */
-function PlayoffBrackets({
+/**
+ * Column a winner-bracket round occupies in the shared playoff grid. A loser round L sits in column
+ * L; a winner round sits in the column of the loser round its losers drop into (rounds 1-2 map
+ * straight across, later ones to 2r-2, mirroring the backend topology). That is what makes the
+ * winner bracket skip columns, so its Final lines up with the Loser Bracket Final and the two feed a
+ * Grand Final in the column after them.
+ */
+function winnerColumn(round: number): number {
+  return round <= 2 ? round : 2 * round - 2;
+}
+
+function elbowPath(fromX: number, fromY: number, toX: number, toY: number): string {
+  const midX = (fromX + toX) / 2;
+  return `M${fromX} ${fromY} H${midX} V${toY} H${toX}`;
+}
+
+/**
+ * The whole playoff on one shared column grid: the winner bracket across the top, the loser bracket
+ * below it, and the Grand Final alone in the rightmost column, centred between the two finals that
+ * feed it. Cards and connectors are absolutely positioned so a winner-bracket round can skip a
+ * column (drawing one long connector across it) rather than each bracket being its own independent
+ * strip.
+ */
+function PlayoffGrid({
   bracket,
   onSelect,
   hoveredId,
@@ -151,30 +175,118 @@ function PlayoffBrackets({
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
 }) {
+  const winnerRounds = bracket.winnerRounds;
+  const loserRounds = bracket.loserRounds;
+  const grandFinal = bracket.grandFinal;
+
+  const winnerLayout = useMemo(() => computeTreeLayout(winnerRounds, true), [winnerRounds]);
+  const loserLayout = useMemo(() => computeTreeLayout(loserRounds, false), [loserRounds]);
+
+  const winnerTop = SECTION_HEADER_HEIGHT;
+  const winnerBottom = winnerTop + (winnerRounds.length > 0 ? winnerLayout.totalHeight : 0);
+  const loserHeaderTop = winnerBottom + SECTION_GAP;
+  const loserTop = loserHeaderTop + SECTION_HEADER_HEIGHT;
+  const height = loserRounds.length > 0 ? loserTop + loserLayout.totalHeight : winnerBottom;
+
+  const columnX = (column: number) => (column - 1) * (CARD_WIDTH + CONNECTOR_WIDTH);
+  const winnerColumns = winnerRounds.map((round) => winnerColumn(round.round));
+  const loserColumns = loserRounds.map((round) => round.round);
+  const lastColumn = Math.max(1, ...winnerColumns, ...loserColumns);
+  const grandFinalColumn = lastColumn + 1;
+  const width = columnX(grandFinal ? grandFinalColumn : lastColumn) + CARD_WIDTH;
+
+  const cards: { match: BracketMatch; x: number; y: number }[] = [];
+  const headers: { key: string; title: string; x: number; top: number }[] = [];
+  const paths: string[] = [];
+
+  // One bracket's cards, its round headers, and the connectors into its next round.
+  const place = (
+    rounds: BracketRound[],
+    layout: ReturnType<typeof computeTreeLayout>,
+    columns: number[],
+    top: number,
+    headerTop: number,
+    titlePrefix: string,
+  ) => {
+    rounds.forEach((round, ri) => {
+      const x = columnX(columns[ri]);
+      headers.push({ key: `${titlePrefix}-${round.round}`, title: `${titlePrefix} ${round.title}`, x, top: headerTop });
+
+      round.matches.forEach((match) => {
+        const y = layout.positions[ri]?.get(match.indexInRound);
+        if (y === undefined) {
+          return;
+        }
+
+        cards.push({ match, x, y: top + y });
+
+        if (ri < rounds.length - 1) {
+          const target = targetIndex(layout.widths[ri], layout.widths[ri + 1], match.indexInRound);
+          const targetY = layout.positions[ri + 1]?.get(target);
+          if (targetY !== undefined) {
+            paths.push(elbowPath(x + CARD_WIDTH, top + y, columnX(columns[ri + 1]), top + targetY));
+          }
+        }
+      });
+    });
+  };
+
+  place(winnerRounds, winnerLayout, winnerColumns, winnerTop, 0, 'Upper');
+  place(loserRounds, loserLayout, loserColumns, loserTop, loserHeaderTop, 'Lower');
+
+  // The Grand Final sits between the two finals that feed it.
+  const finalOf = (rounds: BracketRound[], layout: ReturnType<typeof computeTreeLayout>, top: number, columns: number[]) => {
+    const ri = rounds.length - 1;
+    const match = rounds[ri]?.matches[0];
+    const y = match ? layout.positions[ri]?.get(match.indexInRound) : undefined;
+    return y === undefined ? null : { x: columnX(columns[ri]), y: top + y };
+  };
+
+  if (grandFinal) {
+    const winnerFinal = finalOf(winnerRounds, winnerLayout, winnerTop, winnerColumns);
+    const loserFinal = finalOf(loserRounds, loserLayout, loserTop, loserColumns);
+    const x = columnX(grandFinalColumn);
+    const y = winnerFinal && loserFinal ? (winnerFinal.y + loserFinal.y) / 2 : (winnerFinal ?? loserFinal)?.y ?? CARD_HEIGHT / 2;
+
+    headers.push({ key: 'grand-final', title: 'Grand Final', x, top: 0 });
+    cards.push({ match: grandFinal, x, y });
+    for (const source of [winnerFinal, loserFinal]) {
+      if (source) {
+        paths.push(elbowPath(source.x + CARD_WIDTH, source.y, x, y));
+      }
+    }
+  }
+
   return (
-    <Stack spacing={4}>
-      <BracketSection label="Winner Bracket" rounds={bracket.winnerRounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
-      {bracket.loserRounds.length > 0 && (
-        <BracketSection
-          label="Loser Bracket"
-          rounds={bracket.loserRounds}
-          onSelect={onSelect}
-          hoveredId={hoveredId}
-          onHover={onHover}
-          roundsAlwaysHalve={false}
-        />
-      )}
-      {bracket.grandFinal && (
-        <Stack spacing={1}>
-          <Typography variant="subtitle2" color="text.secondary">
-            Grand Final
+    <Box sx={{ position: 'relative', width, height, minWidth: width }}>
+      <Box
+        component="svg"
+        width={width}
+        height={height}
+        sx={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+      >
+        {paths.map((d) => (
+          <path key={d} d={d} fill="none" stroke={CONNECTOR_COLOR} strokeWidth={1.5} />
+        ))}
+      </Box>
+
+      {headers.map((header) => (
+        <Box key={header.key} sx={{ position: 'absolute', left: header.x, top: header.top, width: CARD_WIDTH }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ textAlign: 'center' }} noWrap>
+            {header.title}
           </Typography>
-          <Box sx={{ width: CARD_WIDTH }}>
-            <MatchCard match={bracket.grandFinal} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
-          </Box>
-        </Stack>
-      )}
-    </Stack>
+        </Box>
+      ))}
+
+      {cards.map((card) => (
+        <Box
+          key={card.match.id}
+          sx={{ position: 'absolute', left: card.x, top: card.y - CARD_HEIGHT / 2, width: CARD_WIDTH }}
+        >
+          <MatchCard match={card.match} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+        </Box>
+      ))}
+    </Box>
   );
 }
 
@@ -224,7 +336,7 @@ function GroupStagePlayoffView({
       {tab === 1 &&
         (playoffStarted ? (
           <Box sx={{ overflowX: 'auto' }}>
-            <PlayoffBrackets bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+            <PlayoffGrid bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
           </Box>
         ) : (
           <Typography color="text.secondary">
@@ -234,39 +346,6 @@ function GroupStagePlayoffView({
 
       {tab === 2 && <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={onHover} />}
     </Box>
-  );
-}
-
-function BracketSection({
-  label,
-  rounds,
-  onSelect,
-  hoveredId,
-  onHover,
-  roundsAlwaysHalve,
-}: {
-  label: string;
-  rounds: BracketRound[];
-  onSelect?: (matchId: string) => void;
-  hoveredId: string | null;
-  onHover: (participantId: string | null) => void;
-  roundsAlwaysHalve?: boolean;
-}) {
-  return (
-    <Stack spacing={1}>
-      <Typography variant="subtitle2" color="text.secondary">
-        {label}
-      </Typography>
-      <Box sx={{ overflowX: 'auto' }}>
-        <BracketTree
-          rounds={rounds}
-          onSelect={onSelect}
-          hoveredId={hoveredId}
-          onHover={onHover}
-          roundsAlwaysHalve={roundsAlwaysHalve}
-        />
-      </Box>
-    </Stack>
   );
 }
 
@@ -404,20 +483,15 @@ function BracketTree({
   hoveredId,
   onHover,
   extraMatch,
-  roundsAlwaysHalve = true,
 }: {
   rounds: BracketRound[];
   onSelect?: (matchId: string) => void;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
   extraMatch?: { label: string; match: BracketMatch } | null;
-  /** False for a loser bracket, whose drop-in rounds keep the same match count instead of halving. */
-  roundsAlwaysHalve?: boolean;
 }) {
-  const { positions, widths, totalHeight } = useMemo(
-    () => computeTreeLayout(rounds, roundsAlwaysHalve),
-    [rounds, roundsAlwaysHalve],
-  );
+  // Single Elimination only; its rounds always halve. The playoff grid lays its two brackets out itself.
+  const { positions, widths, totalHeight } = useMemo(() => computeTreeLayout(rounds, true), [rounds]);
 
   // Anchor the extra match (Third Place) to the bottom edge of the last round's lowest card, not
   // its center - using the center directly under-accounted for the card's own half-height and let
