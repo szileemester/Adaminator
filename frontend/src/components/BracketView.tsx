@@ -25,6 +25,12 @@ const RANK_COLORS: Record<number, { trophy: string; bg: string }> = {
   3: { trophy: '#CD7F32', bg: 'rgba(205,127,50,0.15)' },
 };
 
+/** A group standing's projected playoff destination: the top half of the group advances to the Upper Bracket, the bottom half to the Lower Bracket - nobody is eliminated at the group stage. */
+const BRACKET_TIER_COLORS = {
+  upper: { text: '#3fb950', bg: 'rgba(63,185,80,0.15)' },
+  lower: { text: '#ffa726', bg: 'rgba(255,167,38,0.15)' },
+};
+
 function formatOrdinal(n: number): string {
   const mod100 = n % 100;
   if (mod100 >= 11 && mod100 <= 13) {
@@ -322,7 +328,7 @@ function GroupStagePlayoffView({
               </Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, alignItems: 'start' }}>
                 <GroupMatchesTable rounds={group.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
-                <StandingsTable standings={group.standings} hoveredId={hoveredId} onHover={onHover} />
+                <StandingsTable standings={group.standings} hoveredId={hoveredId} onHover={onHover} bracketSplit />
               </Box>
             </Stack>
           ))}
@@ -827,11 +833,20 @@ function StandingsTable({
   standings,
   hoveredId,
   onHover,
+  bracketSplit = false,
 }: {
   standings: StandingRow[];
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
+  /**
+   * True for a Group Stage + Playoff group: rows are colored and labeled by playoff destination
+   * (top half -> Upper Bracket, bottom half -> Lower Bracket) instead of the trophy-styled final
+   * rank the Leaderboard tab uses - a group's rank 1 isn't a tournament placement.
+   */
+  bracketSplit?: boolean;
 }) {
+  const upperCount = Math.floor(standings.length / 2);
+
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2" color="text.secondary">
@@ -849,8 +864,9 @@ function StandingsTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {standings.map((row) => {
-              const colors = RANK_COLORS[row.rank];
+            {standings.map((row, index) => {
+              const tier = bracketSplit ? (index < upperCount ? BRACKET_TIER_COLORS.upper : BRACKET_TIER_COLORS.lower) : null;
+              const colors = tier ?? RANK_COLORS[row.rank];
               const isHovered = row.participantId === hoveredId;
               return (
                 <TableRow
@@ -863,7 +879,23 @@ function StandingsTable({
                   }}
                 >
                   <TableCell>
-                    <PlaceCell rankStart={row.rank} rankEnd={row.rank} />
+                    {bracketSplit ? (
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <Typography variant="body2">{row.rank}</Typography>
+                        <Chip
+                          size="small"
+                          label={index < upperCount ? 'Upper Bracket' : 'Lower Bracket'}
+                          sx={{
+                            color: tier!.text,
+                            bgcolor: tier!.bg,
+                            fontWeight: 600,
+                            '& .MuiChip-label': { px: 1 },
+                          }}
+                        />
+                      </Stack>
+                    ) : (
+                      <PlaceCell rankStart={row.rank} rankEnd={row.rank} />
+                    )}
                   </TableCell>
                   <TableCell sx={{ fontWeight: isHovered ? 700 : 400 }}>{row.name}</TableCell>
                   <TableCell align="right">{row.played}</TableCell>
