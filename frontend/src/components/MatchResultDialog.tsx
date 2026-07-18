@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -36,11 +36,9 @@ interface GameSlot {
 
 const blankSlot = (): GameSlot => ({ scoreA: null, scoreB: null, participantAWon: null });
 
-function initEntries(existing: BracketMatch['entries'], maxGames: number): GameSlot[] {
-  return Array.from({ length: maxGames }, (_, i) => {
-    const entry = existing[i];
-    return entry ? { scoreA: entry.scoreA, scoreB: entry.scoreB, participantAWon: entry.participantAWon } : blankSlot();
-  });
+/** Winner implied by a game's scores once both are entered, otherwise whatever was already selected (e.g. by a toggle click). */
+function deriveWinner(scoreA: number | null, scoreB: number | null, fallback: boolean | null): boolean | null {
+  return scoreA != null && scoreB != null ? scoreA > scoreB : fallback;
 }
 
 interface MatchResultDialogProps {
@@ -58,7 +56,12 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   // (Match.ScoreType is only set once a result is first saved), so there is no sensible default to
   // silently preselect here.
   const [scoreType, setScoreType] = useState<ScoreType | null>(match.scoreType);
-  const [entries, setEntries] = useState<GameSlot[]>(() => initEntries(match.entries, matchFormatGameCount(matchFormat)));
+  // Only the played prefix is stored - a slot never exists in state until the admin has touched it,
+  // so there is no fixed-length array to keep in sync with the match format (see the format Select's
+  // onChange, which truncates this directly instead of a resize effect).
+  const [entries, setEntries] = useState<GameSlot[]>(() =>
+    match.entries.map((e) => ({ scoreA: e.scoreA, scoreB: e.scoreB, participantAWon: e.participantAWon })),
+  );
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forfeitWinnerId, setForfeitWinnerId] = useState<string | null>(null);
@@ -66,23 +69,6 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
 
   const maxGames = matchFormatGameCount(matchFormat);
   const required = requiredWins(matchFormat);
-
-  // Resize the fixed slot list when the format changes (e.g. Bo5 -> Bo3 drops the trailing slots),
-  // keeping whatever was already entered in the slots that still exist.
-  useEffect(() => {
-    setEntries((prev) => {
-      if (prev.length === maxGames) {
-        return prev;
-      }
-
-      const next = prev.slice(0, maxGames);
-      while (next.length < maxGames) {
-        next.push(blankSlot());
-      }
-
-      return next;
-    });
-  }, [maxGames]);
 
   const isFilled = (slot: GameSlot) =>
     scoreType === 'Points' ? slot.scoreA != null && slot.scoreB != null : slot.participantAWon != null;
@@ -94,7 +80,8 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
     filledCount++;
   }
 
-  const playedWinsA = entries.slice(0, filledCount).filter((e) => e.participantAWon === true).length;
+  const played = entries.slice(0, filledCount);
+  const playedWinsA = played.filter((e) => e.participantAWon === true).length;
   const playedWinsB = filledCount - playedWinsA;
   const isDecisive = playedWinsA >= required || playedWinsB >= required;
   // One panel enabled at a time: the played ones, plus exactly one more to play next - unless the
@@ -103,21 +90,22 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
 
   const invalidateBracket = () => queryClient.invalidateQueries({ queryKey: ['bracket', tournamentId] });
 
-  const playedEntries = (): ScoreEntryInput[] =>
-    entries.slice(0, filledCount).map((slot) => ({
+  const buildPayload = () => {
+    if (!scoreType) {
+      throw new Error('Choose a score type first.');
+    }
+
+    const playedEntries: ScoreEntryInput[] = played.map((slot) => ({
       scoreA: slot.scoreA,
       scoreB: slot.scoreB,
-      participantAWon: slot.participantAWon ?? false, // guaranteed non-null: every slot before filledCount passed isFilled
+      participantAWon: slot.participantAWon ?? false, // guaranteed non-null: every slot in `played` passed isFilled
     }));
 
-  const saveMutation = useMutation({
-    mutationFn: () => {
-      if (!scoreType) {
-        throw new Error('Choose a score type first.');
-      }
+    return { matchFormat, scoreType, entries: playedEntries };
+  };
 
-      return saveMatchResult(tournamentId, match.id, { matchFormat, scoreType, entries: playedEntries() });
-    },
+  const saveMutation = useMutation({
+    mutationFn: () => saveMatchResult(tournamentId, match.id, buildPayload()),
     onSuccess: async () => {
       setError(null);
       setDirty(false);
@@ -127,13 +115,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   });
 
   const completeMutation = useMutation({
-    mutationFn: () => {
-      if (!scoreType) {
-        throw new Error('Choose a score type first.');
-      }
-
-      return completeMatch(tournamentId, match.id, { matchFormat, scoreType, entries: playedEntries() });
-    },
+    mutationFn: () => completeMatch(tournamentId, match.id, buildPayload()),
     onSuccess: async () => {
       await invalidateBracket();
       onClose();
@@ -168,11 +150,12 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   const busy =
     saveMutation.isPending || completeMutation.isPending || forfeitMutation.isPending || undoMutation.isPending;
 
-  // Changing game `index` clears every game after it - their results were only meaningful given the
-  // history leading up to them, and that history just changed (e.g. edit game 3 of an A,A,B,A run and
-  // game 4's stale "A" would otherwise survive even though the decisive game is now earlier).
+  // Patches game `index` and drops every slot after it, since `entries` only ever stores the played
+  // prefix: editing an earlier game changes the history leading up to the later ones, so their old
+  // results (e.g. game 4's stale "A" after game 3 changes from B to A) are no longer meaningful and
+  // must be re-entered rather than silently carried over.
   const updateEntry = (index: number, patch: Partial<GameSlot>) => {
-    setEntries((prev) => prev.map((slot, i) => (i < index ? slot : i === index ? { ...slot, ...patch } : blankSlot())));
+    setEntries((prev) => [...prev.slice(0, index), { ...(prev[index] ?? blankSlot()), ...patch }]);
     setDirty(true);
   };
 
@@ -222,7 +205,12 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                     label="Match format"
                     value={matchFormat}
                     onChange={(e) => {
-                      setMatchFormat(e.target.value as MatchFormat);
+                      const format = e.target.value as MatchFormat;
+                      setMatchFormat(format);
+                      // A shrinking format (e.g. Bo5 -> Bo3) can drop games the admin already entered
+                      // beyond the new count; a growing one needs no action, since slice() is a no-op
+                      // when the array is already shorter than the new maxGames.
+                      setEntries((prev) => prev.slice(0, matchFormatGameCount(format)));
                       setDirty(true);
                     }}
                   >
@@ -265,7 +253,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                 </Typography>
               ) : (
                 <Stack spacing={1}>
-                  {entries.map((slot, index) => {
+                  {Array.from({ length: maxGames }, (_, index) => entries[index] ?? blankSlot()).map((slot, index) => {
                     const enabled = index < enabledCount;
                     return (
                       <Stack key={index} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -285,11 +273,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                               onFocus={(e) => e.target.select()}
                               onChange={(e) => {
                                 const scoreA = e.target.value === '' ? null : Number(e.target.value);
-                                const { scoreB } = slot;
-                                updateEntry(index, {
-                                  scoreA,
-                                  participantAWon: scoreA != null && scoreB != null ? scoreA > scoreB : slot.participantAWon,
-                                });
+                                updateEntry(index, { scoreA, participantAWon: deriveWinner(scoreA, slot.scoreB, slot.participantAWon) });
                               }}
                             />
                             <TextField
@@ -303,11 +287,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                               onFocus={(e) => e.target.select()}
                               onChange={(e) => {
                                 const scoreB = e.target.value === '' ? null : Number(e.target.value);
-                                const { scoreA } = slot;
-                                updateEntry(index, {
-                                  scoreB,
-                                  participantAWon: scoreA != null && scoreB != null ? scoreA > scoreB : slot.participantAWon,
-                                });
+                                updateEntry(index, { scoreB, participantAWon: deriveWinner(slot.scoreA, scoreB, slot.participantAWon) });
                               }}
                             />
                           </>
