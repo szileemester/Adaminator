@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import type { ComponentProps } from 'react';
 import {
+  Alert,
   Box,
   Chip,
   Paper,
@@ -138,7 +139,18 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
           )}
         </Box>
       ) : isRoundRobin ? (
-        <StandingsTable standings={bracket.standings} hoveredId={hoveredId} onHover={setHoveredId} />
+        <Stack spacing={2} sx={{ alignItems: 'flex-start' }}>
+          <StandingsTable standings={bracket.standings} hoveredId={hoveredId} onHover={setHoveredId} />
+          {bracket.tiebreakerRounds.length > 0 && (
+            <GroupMatchesTable
+              rounds={bracket.tiebreakerRounds}
+              onSelect={onSelect}
+              hoveredId={hoveredId}
+              onHover={setHoveredId}
+              title="Tie-breakers"
+            />
+          )}
+        </Stack>
       ) : (
         <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={setHoveredId} />
       )}
@@ -308,7 +320,35 @@ function PlayoffGrid({
   );
 }
 
-/** Group Stage + Playoff: Group Stage tab (per-group schedule + standings), Playoffs tab, and Leaderboard tab. */
+/** One labelled block of tie-breaker matches - a single group's, or the cross-group deciders. */
+function TiebreakerSection({
+  heading,
+  title,
+  rounds,
+  onSelect,
+  hoveredId,
+  onHover,
+}: {
+  heading: string;
+  title: string;
+  rounds: BracketRound[];
+  onSelect?: (matchId: string) => void;
+  hoveredId: string | null;
+  onHover: (participantId: string | null) => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2" color="text.secondary">
+        {heading}
+      </Typography>
+      <Box sx={{ maxWidth: 640 }}>
+        <GroupMatchesTable rounds={rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} title={title} />
+      </Box>
+    </Stack>
+  );
+}
+
+/** Group Stage + Playoff: Group Stage, its own Tie-breakers stage, Playoffs, and Leaderboard. */
 function GroupStagePlayoffView({
   bracket,
   onSelect,
@@ -321,12 +361,23 @@ function GroupStagePlayoffView({
   onHover: (participantId: string | null) => void;
 }) {
   const playoffStarted = bracket.winnerRounds.length > 0;
-  const [tab, setTab] = useState(() => (bracket.status === 'Finished' ? 2 : playoffStarted ? 1 : 0));
+  const tiebreakerGroups = bracket.groups.filter((group) => group.tiebreakerRounds.length > 0);
+  // Deciders played *between* groups, when equally-placed players contest the last playoff slots.
+  const crossGroupTiebreakers = bracket.tiebreakerRounds;
+  const hasTiebreakers = tiebreakerGroups.length > 0 || crossGroupTiebreakers.length > 0;
+  // Tie-breakers are a real stage between the group stage and the playoff, so land on whichever
+  // stage is actually live: the playoff once started, otherwise a pending/played tie-break.
+  const [tab, setTab] = useState(() => {
+    if (bracket.status === 'Finished') return 3;
+    if (playoffStarted) return 2;
+    return hasTiebreakers || bracket.needsTiebreakers ? 1 : 0;
+  });
 
   return (
     <Box sx={{ pb: 1 }}>
       <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
         <Tab label="Group Stage" sx={{ minHeight: 36, py: 0 }} />
+        <Tab label="Tie-breakers" sx={{ minHeight: 36, py: 0 }} />
         <Tab label="Playoffs" sx={{ minHeight: 36, py: 0 }} />
         <Tab label="Leaderboard" sx={{ minHeight: 36, py: 0 }} />
       </Tabs>
@@ -347,7 +398,46 @@ function GroupStagePlayoffView({
         </Stack>
       )}
 
-      {tab === 1 &&
+      {tab === 1 && (
+        <Stack spacing={3}>
+          {bracket.needsTiebreakers && (
+            <Alert severity="warning">
+              A tie that decides the Upper/Lower split is unresolved. Use <strong>Resolve tie-breakers</strong> above to
+              generate the next round - the playoff stays locked until it is settled.
+            </Alert>
+          )}
+          {tiebreakerGroups.map((group) => (
+            <TiebreakerSection
+              key={group.groupIndex}
+              heading={groupLabel(group.groupIndex)}
+              title="Tie-breaker matches"
+              rounds={group.tiebreakerRounds}
+              onSelect={onSelect}
+              hoveredId={hoveredId}
+              onHover={onHover}
+            />
+          ))}
+
+          {crossGroupTiebreakers.length > 0 && (
+            <TiebreakerSection
+              heading="Between groups"
+              title="Deciding the last playoff slots"
+              rounds={crossGroupTiebreakers}
+              onSelect={onSelect}
+              hoveredId={hoveredId}
+              onHover={onHover}
+            />
+          )}
+
+          {!hasTiebreakers && !bracket.needsTiebreakers && (
+            <Typography color="text.secondary">
+              No tie-breakers were needed - every group's standings separated on their own.
+            </Typography>
+          )}
+        </Stack>
+      )}
+
+      {tab === 2 &&
         (playoffStarted ? (
           <Box sx={{ overflowX: 'auto' }}>
             <PlayoffGrid bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
@@ -358,7 +448,7 @@ function GroupStagePlayoffView({
           </Typography>
         ))}
 
-      {tab === 2 && <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={onHover} />}
+      {tab === 3 && <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={onHover} />}
     </Box>
   );
 }
@@ -640,8 +730,8 @@ function RoundColumns({
 }
 
 function findMatch(bracket: Bracket, matchId: string): BracketMatch | null {
-  const groupRounds = bracket.groups.flatMap((group) => group.rounds);
-  for (const round of [...bracket.winnerRounds, ...bracket.loserRounds, ...groupRounds]) {
+  const groupRounds = bracket.groups.flatMap((group) => [...group.rounds, ...group.tiebreakerRounds]);
+  for (const round of [...bracket.winnerRounds, ...bracket.loserRounds, ...bracket.tiebreakerRounds, ...groupRounds]) {
     const found = round.matches.find((m) => m.id === matchId);
     if (found) {
       return found;
@@ -759,16 +849,18 @@ function GroupMatchesTable({
   onSelect,
   hoveredId,
   onHover,
+  title = 'Matches',
 }: {
   rounds: BracketRound[];
   onSelect?: (matchId: string) => void;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
+  title?: string;
 }) {
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2" color="text.secondary">
-        Matches
+        {title}
       </Typography>
       <TableContainer component={Paper} variant="outlined">
         <Table size="small">
@@ -937,7 +1029,7 @@ function PlacementsList({
   if (placements.length === 0) {
     return (
       <Typography color="text.secondary">
-        Placements will appear here as participants are eliminated.
+        The results table appears once the bracket is generated.
       </Typography>
     );
   }
@@ -960,28 +1052,35 @@ function PlacementsList({
                   <PlaceCell rankStart={group.rankStart} rankEnd={group.rankEnd} />
                 </TableCell>
                 <TableCell>
-                  <Stack spacing={0.5}>
-                    {group.participants.map((participant) => {
-                      const isHovered = participant.participantId === hoveredId;
-                      return (
-                        <Box
-                          key={participant.participantId}
-                          onMouseEnter={() => onHover(participant.participantId)}
-                          onMouseLeave={() => onHover(null)}
-                          sx={{
-                            borderRadius: 1,
-                            boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
-                          }}
-                        >
-                          <ParticipantLabel
-                            name={participant.name}
-                            emoji={participant.emoji}
-                            sx={{ fontWeight: isHovered ? 700 : 400 }}
-                          />
-                        </Box>
-                      );
-                    })}
-                  </Stack>
+                  {/* The row exists from the start; it stays a placeholder until this place is decided. */}
+                  {group.participants.length === 0 ? (
+                    <Typography variant="body2" color="text.disabled">
+                      Undecided
+                    </Typography>
+                  ) : (
+                    <Stack spacing={0.5}>
+                      {group.participants.map((participant) => {
+                        const isHovered = participant.participantId === hoveredId;
+                        return (
+                          <Box
+                            key={participant.participantId}
+                            onMouseEnter={() => onHover(participant.participantId)}
+                            onMouseLeave={() => onHover(null)}
+                            sx={{
+                              borderRadius: 1,
+                              boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
+                            }}
+                          >
+                            <ParticipantLabel
+                              name={participant.name}
+                              emoji={participant.emoji}
+                              sx={{ fontWeight: isHovered ? 700 : 400 }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Stack>
+                  )}
                 </TableCell>
               </TableRow>
             );

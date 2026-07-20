@@ -28,29 +28,90 @@ public class GroupStagePlayoffBracketTests
     }
 
     [Theory]
-    [InlineData(6, 2)]   // not a power of two
-    [InlineData(8, 3)]   // 3 does not divide 8
+    [InlineData(3, 2)]   // too few for even the smallest playoff
     [InlineData(8, 1)]   // fewer than 2 groups
-    [InlineData(8, 8)]   // group size 1 - cannot split into halves
+    [InlineData(8, 8)]   // groups of 1 have no matches to play
     public void ValidateShape_rejects_unsupported_shapes(int participants, int groups)
     {
         FluentActions.Invoking(() => GroupStagePlayoffBracket.ValidateShape(participants, groups)).Should().Throw<DomainException>();
     }
 
+    [Theory]
+    [InlineData(9, 2)]   // uneven groups (5 + 4)
+    [InlineData(12, 3)]  // playoff slots do not divide across the groups
+    [InlineData(6, 2)]   // not a power of two
+    [InlineData(32, 4)]
+    public void ValidateShape_accepts_any_roster_that_fills_its_groups(int participants, int groups)
+    {
+        FluentActions.Invoking(() => GroupStagePlayoffBracket.ValidateShape(participants, groups)).Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(4, 4)]
+    [InlineData(8, 8)]
+    [InlineData(9, 8)]    // the 9th player misses out
+    [InlineData(15, 8)]
+    [InlineData(16, 16)]
+    [InlineData(31, 16)]
+    public void PlayoffCapacity_is_the_largest_power_of_two_the_roster_fills(int participants, int expected)
+    {
+        GroupStagePlayoffBracket.PlayoffCapacity(participants).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(9, 2, new[] { 5, 4 })]
+    [InlineData(12, 3, new[] { 4, 4, 4 })]
+    [InlineData(10, 4, new[] { 3, 3, 2, 2 })]
+    public void GroupSizes_spread_the_remainder_over_the_earlier_groups(int participants, int groups, int[] expected)
+    {
+        GroupStagePlayoffBracket.GroupSizes(participants, groups).Should().Equal(expected);
+    }
+
+    // ---- Placement levels ----
+
+    [Fact]
+    public void Levels_for_an_exact_power_of_two_are_a_clean_split_with_no_contest()
+    {
+        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 4, 4 }, capacity: 8);
+
+        levels.Select(l => l.Outcome).Should()
+            .Equal(LevelOutcome.Upper, LevelOutcome.Upper, LevelOutcome.Lower, LevelOutcome.Lower);
+    }
+
+    [Fact]
+    public void Levels_for_nine_players_in_two_groups_eliminate_only_the_odd_one_out()
+    {
+        // Groups of 5 and 4: eight advance (top four of each), the 5th-placed player is out.
+        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 5, 4 }, capacity: 8);
+
+        levels.Select(l => l.Outcome).Should()
+            .Equal(LevelOutcome.Upper, LevelOutcome.Upper, LevelOutcome.Lower, LevelOutcome.Lower, LevelOutcome.Eliminated);
+        levels[4].Size.Should().Be(1); // only the bigger group reaches a 5th place
+    }
+
+    [Fact]
+    public void Levels_contest_the_slots_when_the_playoff_does_not_divide_across_groups()
+    {
+        // 12 players in 3 groups: 8 advance, so the runners-up contest the Upper/Lower line and the
+        // third-placed players contest the last playoff slots.
+        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 4, 4, 4 }, capacity: 8);
+
+        levels.Select(l => l.Outcome).Should()
+            .Equal(LevelOutcome.Upper, LevelOutcome.Contested, LevelOutcome.Contested, LevelOutcome.Eliminated);
+    }
+
     // ---- Seed pools ----
 
     [Fact]
-    public void SeedPools_splits_top_and_bottom_half_interleaving_across_groups()
+    public void SeedPools_splits_the_seed_order_into_upper_lower_and_eliminated()
     {
-        var g0 = new List<Guid> { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        var g1 = new List<Guid> { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+        var ids = NewIds(9);
 
-        var (upper, lower) = GroupStagePlayoffBracket.SeedPools(new[] { (IReadOnlyList<Guid>)g0, g1 });
+        var (upper, lower, eliminated) = GroupStagePlayoffBracket.SeedPools(ids, capacity: 8);
 
-        // Ranks 1-2 of each group, interleaved by rank across groups.
-        upper.Should().Equal(g0[0], g1[0], g0[1], g1[1]);
-        // Ranks 3-4 of each group.
-        lower.Should().Equal(g0[2], g1[2], g0[3], g1[3]);
+        upper.Should().Equal(ids.Take(4));
+        lower.Should().Equal(ids.Skip(4).Take(4));
+        eliminated.Should().Equal(ids[8]);
     }
 
     // ---- Playoff construction ----

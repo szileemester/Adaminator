@@ -62,6 +62,7 @@ export function EditTournamentPage() {
                 thirdPlaceEnabled: tournament.thirdPlaceEnabled,
                 defaultScoreType: tournament.defaultScoreType,
                 groupCount: tournament.groupCount || 2,
+                tiebreakerPolicy: tournament.tiebreakerPolicy,
               }}
               onSubmit={(values) => {
                 setError(null);

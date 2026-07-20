@@ -17,19 +17,31 @@ namespace Adaminator.Domain.Brackets;
 public static class GroupStagePlayoffBracket
 {
     /// <summary>
-    /// Participant counts whose playoff is a clean, bye-free double elimination (upper = lower = N/2,
-    /// itself a power of two). Every participant reaches the playoff, so this is exactly the set of
-    /// capacities the underlying Double Elimination topology supports.
+    /// How many participants reach the playoff: the largest bye-free double-elimination capacity that
+    /// fits the roster (4, 8, 16 or 32). Anyone the roster carries beyond that is eliminated at the end
+    /// of the group stage, so the playoff itself is always a clean power of two.
     /// </summary>
-    public static IReadOnlyList<int> SupportedParticipantCounts => DoubleEliminationBracket.SupportedCapacities;
+    public static int PlayoffCapacity(int participantCount) =>
+        DoubleEliminationBracket.SupportedCapacities
+            .Where(c => c <= participantCount)
+            .DefaultIfEmpty(DoubleEliminationBracket.MinCapacity)
+            .Max();
+
+    /// <summary>Group sizes for <paramref name="participantCount"/> dealt into <paramref name="groupCount"/> groups, as even as possible with the remainder going to the earlier groups.</summary>
+    public static IReadOnlyList<int> GroupSizes(int participantCount, int groupCount)
+    {
+        var baseSize = participantCount / groupCount;
+        var remainder = participantCount % groupCount;
+        return Enumerable.Range(0, groupCount).Select(g => baseSize + (g < remainder ? 1 : 0)).ToList();
+    }
 
     /// <summary>Validates the group/participant shape; thrown at tournament start (mirrors the other builders' start-time validation).</summary>
     public static void ValidateShape(int participantCount, int groupCount)
     {
-        if (!SupportedParticipantCounts.Contains(participantCount))
+        if (participantCount < DoubleEliminationBracket.MinCapacity)
         {
             throw new DomainException(
-                $"Group Stage + Playoff supports {string.Join(", ", SupportedParticipantCounts)} participants (a power of two); {participantCount} given.");
+                $"Group Stage + Playoff needs at least {DoubleEliminationBracket.MinCapacity} participants; {participantCount} given.");
         }
 
         if (groupCount < 2)
@@ -37,15 +49,11 @@ public static class GroupStagePlayoffBracket
             throw new DomainException("Group Stage + Playoff needs at least 2 groups.");
         }
 
-        if (participantCount % groupCount != 0)
-        {
-            throw new DomainException($"{participantCount} participants do not divide evenly into {groupCount} groups.");
-        }
-
-        if (participantCount / groupCount % 2 != 0)
+        // Every group has to actually play a round robin, so it needs at least two participants.
+        if (groupCount * 2 > participantCount)
         {
             throw new DomainException(
-                $"Each group must have an even number of participants so it splits into top/bottom halves; {participantCount / groupCount} per group.");
+                $"{participantCount} participants cannot fill {groupCount} groups of at least 2; use at most {participantCount / 2} groups.");
         }
     }
 
@@ -69,34 +77,91 @@ public static class GroupStagePlayoffBracket
     }
 
     /// <summary>
-    /// Splits per-group standings (each best-&gt;worst) into the upper and lower playoff seed pools.
-    /// Interleaves across groups by rank (every group's #1, then every group's #2, …) so sequential
-    /// pairing spreads the group leaders and avoids same-group first-round rematches.
+    /// One "placement level": everyone who finished <see cref="Position"/>-th in their own group.
+    /// Participants are seeded level by level (all group winners, then all runners-up, …), so a level's
+    /// members occupy global seed indices <see cref="Start"/>..<see cref="End"/>.
     /// </summary>
-    public static (List<Guid> Upper, List<Guid> Lower) SeedPools(IReadOnlyList<IReadOnlyList<Guid>> groupStandings)
+    public readonly record struct PlacementLevel(int Position, int Start, int End, LevelOutcome Outcome)
     {
-        var groupSize = groupStandings[0].Count;
-        var half = groupSize / 2;
+        /// <summary>How many participants finished at this placement - one per group large enough to have the position.</summary>
+        public int Size => End - Start + 1;
+    }
 
-        var upper = new List<Guid>();
-        var lower = new List<Guid>();
-        for (var rank = 0; rank < half; rank++)
+    /// <summary>
+    /// Levels for the given group sizes. Sizes and positions depend only on how many participants each
+    /// group holds - never on results - so the whole plan is known the moment the groups are drawn.
+    /// </summary>
+    public static IReadOnlyList<PlacementLevel> PlanLevels(IReadOnlyList<int> groupSizes, int capacity)
+    {
+        var upperCut = capacity / 2;
+        var levels = new List<PlacementLevel>();
+        var start = 0;
+
+        for (var position = 1; position <= groupSizes.Max(); position++)
         {
-            foreach (var group in groupStandings)
+            var size = groupSizes.Count(s => s >= position);
+            var end = start + size - 1;
+            levels.Add(new PlacementLevel(position, start, end, Classify(start, end, upperCut, capacity)));
+            start += size;
+        }
+
+        return levels;
+    }
+
+    /// <summary>
+    /// Whether a cut falls strictly inside the span <paramref name="start"/>..<paramref name="end"/> -
+    /// i.e. the span's members sit on both sides of it and are competing for the slots either side.
+    /// The one definition of "straddles a boundary", shared with <see cref="RoundRobinStandings"/>.
+    /// </summary>
+    public static bool SpansCut(int start, int end, int cut) => start < cut && cut <= end;
+
+    private static LevelOutcome Classify(int start, int end, int upperCut, int capacity)
+    {
+        if (SpansCut(start, end, upperCut) || SpansCut(start, end, capacity))
+        {
+            return LevelOutcome.Contested;
+        }
+
+        if (end < upperCut)
+        {
+            return LevelOutcome.Upper;
+        }
+
+        return end < capacity ? LevelOutcome.Lower : LevelOutcome.Eliminated;
+    }
+
+    /// <summary>The participants at one placement level - each group's <paramref name="position"/>-th finisher, for every group that has one.</summary>
+    public static List<Guid> LevelMembers(IReadOnlyList<IReadOnlyList<Guid>> groupStandings, int position) =>
+        groupStandings.Where(g => g.Count >= position).Select(g => g[position - 1]).ToList();
+
+    /// <summary>
+    /// Splits a fully ordered seeding list into the Winner Bracket pool, the Loser Bracket pool, and the
+    /// participants who fall outside the playoff capacity and are eliminated at the group stage.
+    /// </summary>
+    public static (List<Guid> Upper, List<Guid> Lower, List<Guid> Eliminated) SeedPools(IReadOnlyList<Guid> seedOrder, int capacity) =>
+        (seedOrder.Take(capacity / 2).ToList(),
+         seedOrder.Skip(capacity / 2).Take(capacity - capacity / 2).ToList(),
+         seedOrder.Skip(capacity).ToList());
+
+    /// <summary>
+    /// The positions inside a group of <paramref name="groupSize"/> where finishing one place lower
+    /// changes a participant's fate (Upper vs Lower vs eliminated, or drops them into a contested
+    /// level). These are the cuts a within-group tie has to straddle to be worth playing off.
+    /// </summary>
+    public static IReadOnlyList<int> GroupBoundaryCuts(IReadOnlyList<PlacementLevel> levels, int groupSize)
+    {
+        var cuts = new List<int>();
+        for (var position = 1; position < groupSize; position++)
+        {
+            var here = levels[position - 1];
+            var next = levels[position];
+            if (here.Outcome != next.Outcome || here.Outcome == LevelOutcome.Contested)
             {
-                upper.Add(group[rank]);
+                cuts.Add(position);
             }
         }
 
-        for (var rank = half; rank < groupSize; rank++)
-        {
-            foreach (var group in groupStandings)
-            {
-                lower.Add(group[rank]);
-            }
-        }
-
-        return (upper, lower);
+        return cuts;
     }
 
     /// <summary>

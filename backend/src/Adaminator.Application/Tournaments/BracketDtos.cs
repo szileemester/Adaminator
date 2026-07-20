@@ -35,8 +35,12 @@ public record StandingRowDto(int Rank, Guid ParticipantId, string Name, string? 
 /// </summary>
 public record PlacementGroupDto(int RankStart, int RankEnd, string Label, IReadOnlyList<BracketSlotDto> Participants);
 
-/// <summary>Group Stage + Playoff only: one group's round-robin schedule and current standings.</summary>
-public record GroupDto(int GroupIndex, IReadOnlyList<BracketRoundDto> Rounds, IReadOnlyList<StandingRowDto> Standings);
+/// <summary>Group Stage + Playoff only: one group's round-robin schedule, current standings, and any played tie-breaker matches.</summary>
+public record GroupDto(
+    int GroupIndex,
+    IReadOnlyList<BracketRoundDto> Rounds,
+    IReadOnlyList<StandingRowDto> Standings,
+    IReadOnlyList<BracketRoundDto> TiebreakerRounds);
 
 public record BracketDto(
     TournamentType Type,
@@ -49,5 +53,8 @@ public record BracketDto(
     IReadOnlyList<StandingRowDto> Standings,
     IReadOnlyList<PlacementGroupDto> Placements,
     IReadOnlyList<GroupDto> Groups,
+    /// <summary>Round Robin only: played tie-breaker matches; the Group Stage + Playoff carries these per-group on <see cref="GroupDto"/>.</summary>
+    IReadOnlyList<BracketRoundDto> TiebreakerRounds,
+    bool NeedsTiebreakers,
     bool CanStartPlayoffs,
     bool CanFinish);

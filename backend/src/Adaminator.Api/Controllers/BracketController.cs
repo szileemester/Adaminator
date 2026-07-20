@@ -63,6 +63,14 @@ public class BracketController : ControllerBase
         return Ok(tournament);
     }
 
+    /// <summary>Round Robin and Group Stage + Playoff: generate the played tie-breaker matches needed to resolve standings ties.</summary>
+    [HttpPost("start-tiebreakers")]
+    public async Task<ActionResult<TournamentDto>> StartTiebreakers(Guid tournamentId, CancellationToken cancellationToken)
+    {
+        var tournament = await _service.StartTiebreakersAsync(tournamentId, cancellationToken);
+        return Ok(tournament);
+    }
+
     /// <summary>Manually finishes a Running tournament; rejected until every deciding match is decided.</summary>
     [HttpPost("finish")]
     public async Task<ActionResult<TournamentDto>> Finish(Guid tournamentId, CancellationToken cancellationToken)

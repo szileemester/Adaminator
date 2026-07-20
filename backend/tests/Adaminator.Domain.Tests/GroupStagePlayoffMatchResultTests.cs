@@ -35,11 +35,19 @@ public class GroupStagePlayoffMatchResultTests
     private static void CompleteA(Tournament tournament, Match match) =>
         tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, true) }, Now);
 
+    /// <summary>Completes a group match with the stronger (lower within-group seed) participant winning, so each group ends in a strict, tie-free order.</summary>
+    private static void CompleteSeeded(Tournament tournament, Match match)
+    {
+        var seedA = tournament.Participants.First(p => p.Id == match.ParticipantAId).Seed;
+        var seedB = tournament.Participants.First(p => p.Id == match.ParticipantBId).Seed;
+        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, seedA < seedB) }, Now);
+    }
+
     private static void DecideAllGroupMatches(Tournament tournament)
     {
         foreach (var match in tournament.Matches.Where(m => m.Segment == BracketSegment.RoundRobin).ToList())
         {
-            CompleteA(tournament, match);
+            CompleteSeeded(tournament, match);
         }
     }
 
@@ -78,11 +86,31 @@ public class GroupStagePlayoffMatchResultTests
     }
 
     [Fact]
-    public void DrawGroups_rejects_an_unsupported_participant_count()
+    public void DrawGroups_rejects_a_roster_too_small_for_a_playoff()
     {
-        var tournament = Planned(6, 2); // 6 is not a power of two
+        var tournament = Planned(3, 2); // fewer than the smallest playoff capacity
 
         tournament.Invoking(t => t.DrawGroups()).Should().Throw<DomainException>();
+    }
+
+    [Fact]
+    public void DrawGroups_rejects_more_groups_than_the_roster_can_fill()
+    {
+        var tournament = Planned(8, 8); // groups of one have no matches
+
+        tournament.Invoking(t => t.DrawGroups()).Should().Throw<DomainException>();
+    }
+
+    [Fact]
+    public void DrawGroups_deals_uneven_groups_when_the_roster_does_not_divide()
+    {
+        var tournament = Planned(9, 2);
+
+        tournament.DrawGroups();
+
+        tournament.Participants.Count(p => p.GroupIndex == 0).Should().Be(5);
+        tournament.Participants.Count(p => p.GroupIndex == 1).Should().Be(4);
+        tournament.Participants.Should().OnlyContain(p => p.GroupIndex != null && p.Seed > 0);
     }
 
     [Fact]
@@ -128,12 +156,12 @@ public class GroupStagePlayoffMatchResultTests
         var groupMatches = tournament.Matches.Where(m => m.Segment == BracketSegment.RoundRobin).ToList();
         foreach (var match in groupMatches.Skip(1))
         {
-            CompleteA(tournament, match);
+            CompleteSeeded(tournament, match);
         }
 
         tournament.CanStartPlayoffs.Should().BeFalse();
 
-        CompleteA(tournament, groupMatches[0]);
+        CompleteSeeded(tournament, groupMatches[0]);
         tournament.CanStartPlayoffs.Should().BeTrue();
         tournament.Invoking(t => t.StartPlayoffs()).Should().NotThrow();
     }

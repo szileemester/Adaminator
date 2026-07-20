@@ -101,6 +101,11 @@ export async function startPlayoffs(tournamentId: string): Promise<Tournament> {
   return data;
 }
 
+export async function startTiebreakers(tournamentId: string): Promise<Tournament> {
+  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/start-tiebreakers`);
+  return data;
+}
+
 export async function getBracket(tournamentId: string): Promise<Bracket> {
   const { data } = await apiClient.get(`/api/tournaments/${tournamentId}/bracket`);
   return data;

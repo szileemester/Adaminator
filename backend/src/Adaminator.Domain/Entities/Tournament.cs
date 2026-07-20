@@ -37,6 +37,9 @@ public class Tournament
     /// <summary>Group Stage + Playoff only: how many groups the roster is drawn into. 0 for every other type.</summary>
     public int GroupCount { get; private set; }
 
+    /// <summary>How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff.</summary>
+    public TiebreakerPolicy TiebreakerPolicy { get; private set; }
+
     public TournamentStatus Status { get; private set; }
 
     /// <summary>
@@ -62,7 +65,8 @@ public class Tournament
         ScoreType defaultScoreType,
         bool thirdPlaceEnabled,
         DateTimeOffset createdAt,
-        int groupCount = 0)
+        int groupCount = 0,
+        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch)
     {
         var tournament = new Tournament
         {
@@ -72,7 +76,7 @@ public class Tournament
             CreatedAt = createdAt
         };
 
-        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount);
+        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy);
         return tournament;
     }
 
@@ -85,10 +89,11 @@ public class Tournament
         MatchFormat defaultMatchFormat,
         ScoreType defaultScoreType,
         bool thirdPlaceEnabled,
-        int groupCount = 0)
+        int groupCount = 0,
+        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch)
     {
         EnsurePlanned("edited");
-        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount);
+        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy);
     }
 
     // ---- Participant management (Planned only) ----
@@ -200,13 +205,22 @@ public class Tournament
 
         GroupStagePlayoffBracket.ValidateShape(_participants.Count, GroupCount);
 
+        // Group sizes need not be equal - a remainder simply makes the earlier groups one bigger.
         var shuffled = _participants.OrderBy(_ => Random.Shared.Next()).ToList();
-        var perGroup = _participants.Count / GroupCount;
-        for (var i = 0; i < shuffled.Count; i++)
+        var sizes = GroupStagePlayoffBracket.GroupSizes(_participants.Count, GroupCount);
+        var next = 0;
+        for (var g = 0; g < GroupCount; g++)
         {
-            shuffled[i].SetGroup(groupIndex: i / perGroup, seedWithinGroup: i % perGroup + 1);
+            for (var seat = 0; seat < sizes[g]; seat++)
+            {
+                shuffled[next++].SetGroup(groupIndex: g, seedWithinGroup: seat + 1);
+            }
         }
     }
+
+    /// <summary>Group Stage + Playoff: how many participants each group actually holds (sizes can differ by one).</summary>
+    private IReadOnlyList<int> CurrentGroupSizes() =>
+        Enumerable.Range(0, GroupCount).Select(g => _participants.Count(p => p.GroupIndex == g)).ToList();
 
     // ---- Start (Planned -> Running) ----
 
@@ -294,12 +308,14 @@ public class Tournament
         Status = TournamentStatus.Finished;
     }
 
-    /// <summary>True once the group stage is complete and the admin can generate the playoff by hand (Group Stage + Playoff only).</summary>
+    /// <summary>True once the group stage is complete (and any tie-breakers resolved) and the admin can generate the playoff by hand (Group Stage + Playoff only).</summary>
     public bool CanStartPlayoffs =>
         Type == TournamentType.GroupStagePlayoff
         && Status == TournamentStatus.Running
         && !PlayoffStarted
-        && GroupStageDecided;
+        && GroupStageDecided
+        && !NeedsTiebreakers
+        && TiebreakerMatches.All(IsDecided);
 
     /// <summary>
     /// Group Stage + Playoff only: seeds and builds the double-elimination playoff from the final
@@ -328,21 +344,235 @@ public class Tournament
             throw new DomainException("Every group match must be decided before starting the playoff.");
         }
 
-        var roster = _participants.ToDictionary(p => p.Id);
-        var groupStandings = new List<IReadOnlyList<Guid>>(GroupCount);
-        for (var g = 0; g < GroupCount; g++)
+        if (NeedsTiebreakers)
         {
-            var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
-            var groupMatches = GroupMatches.Where(m => m.GroupIndex == g);
-            var ranked = RoundRobinStandings.Rank(groupMatches, groupParticipants, roster).Select(r => r.ParticipantId).ToList();
-            groupStandings.Add(ranked);
+            throw new DomainException("Resolve the tie-breakers before starting the playoff.");
         }
 
-        var (upperSeeds, lowerSeeds) = GroupStagePlayoffBracket.SeedPools(groupStandings);
+        if (!TiebreakerMatches.All(IsDecided))
+        {
+            throw new DomainException("Every tie-breaker match must be decided before starting the playoff.");
+        }
+
+        var capacity = GroupStagePlayoffBracket.PlayoffCapacity(_participants.Count);
+        var (upperSeeds, lowerSeeds, _) = GroupStagePlayoffBracket.SeedPools(BuildSeedOrder(capacity), capacity);
         _matches.AddRange(GroupStagePlayoffBracket.BuildPlayoff(this, upperSeeds, lowerSeeds));
     }
 
-    private IEnumerable<Match> GroupMatches => _matches.Where(m => m.Segment == BracketSegment.RoundRobin);
+    /// <summary>Each group's final standings, best to worst.</summary>
+    private List<IReadOnlyList<Guid>> GroupStandings()
+    {
+        var roster = _participants.ToDictionary(p => p.Id);
+        var standings = new List<IReadOnlyList<Guid>>(GroupCount);
+        for (var g = 0; g < GroupCount; g++)
+        {
+            var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
+            standings.Add(RoundRobinStandings.Rank(ScopeMatches(g), groupParticipants, roster).Select(r => r.ParticipantId).ToList());
+        }
+
+        return standings;
+    }
+
+    /// <summary>
+    /// The full seeding order: every group winner, then every runner-up, and so on. A level whose
+    /// members are competing for fewer slots than there are of them is ordered by the cross-group
+    /// decider they played; everything else keeps its group order.
+    /// </summary>
+    private List<Guid> BuildSeedOrder(int capacity)
+    {
+        var standings = GroupStandings();
+        var levels = GroupStagePlayoffBracket.PlanLevels(CurrentGroupSizes(), capacity);
+
+        var order = new List<Guid>(_participants.Count);
+        foreach (var level in levels)
+        {
+            var members = GroupStagePlayoffBracket.LevelMembers(standings, level.Position);
+            order.AddRange(level.Outcome == LevelOutcome.Contested ? OrderByCrossGroupDecider(members) : members);
+        }
+
+        return order;
+    }
+
+    /// <summary>
+    /// Contested levels whose members the cross-group deciders have not separated at the slot they are
+    /// competing for. Only the boundary inside the level matters: members tied above or below it are
+    /// interchangeable, so they are left alone.
+    /// </summary>
+    private List<IReadOnlyList<Guid>> UnresolvedContestedLevels(IReadOnlyList<GroupStagePlayoffBracket.PlacementLevel> levels, int capacity)
+    {
+        var standings = GroupStandings();
+        var unresolved = new List<IReadOnlyList<Guid>>();
+
+        foreach (var level in levels.Where(l => l.Outcome == LevelOutcome.Contested))
+        {
+            var members = GroupStagePlayoffBracket.LevelMembers(standings, level.Position);
+            if (members.Count < 2)
+            {
+                continue;
+            }
+
+            // Cut positions expressed relative to this level's own span.
+            var localCuts = new[] { capacity / 2, capacity }
+                .Where(cut => GroupStagePlayoffBracket.SpansCut(level.Start, level.End, cut))
+                .Select(cut => cut - level.Start)
+                .ToList();
+
+            // The deciders played so far split the level into runs of equal record; a run still spanning
+            // one of those cuts is still contesting that slot.
+            var offset = 0;
+            foreach (var run in RoundRobinStandings.SplitByScore(members, CrossGroupWins(members)))
+            {
+                if (run.Count > 1 && localCuts.Any(cut => GroupStagePlayoffBracket.SpansCut(offset, offset + run.Count - 1, cut)))
+                {
+                    unresolved.Add(run);
+                }
+
+                offset += run.Count;
+            }
+        }
+
+        return unresolved;
+    }
+
+    /// <summary>Orders a contested level by its cross-group tie-breaker record, falling back to name so the order is always total.</summary>
+    private List<Guid> OrderByCrossGroupDecider(List<Guid> members)
+    {
+        var wins = CrossGroupWins(members);
+        var roster = _participants.ToDictionary(p => p.Id);
+        return members
+            .OrderByDescending(id => wins[id])
+            .ThenBy(id => roster[id].Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Wins each member has in the cross-group tie-breaker matches played between two members of the set.</summary>
+    private Dictionary<Guid, int> CrossGroupWins(List<Guid> members) =>
+        RoundRobinStandings.WinsAmong(members, _matches.Where(m => m.Segment == BracketSegment.Tiebreaker && m.GroupIndex is null));
+
+    /// <summary>
+    /// Round Robin and Group Stage + Playoff only: generates played Bo1 tie-breaker matches for every
+    /// tie that this tournament's <see cref="TiebreakerPolicy"/> cannot resolve and that changes an
+    /// outcome (the Upper/Lower split per group, or a Round Robin podium place). One-shot: mirrors
+    /// <see cref="StartPlayoffs"/>, gated on <see cref="NeedsTiebreakers"/>.
+    /// </summary>
+    public void StartTiebreakers()
+    {
+        if (Type is not (TournamentType.RoundRobin or TournamentType.GroupStagePlayoff))
+        {
+            throw new DomainException("Tie-breakers are only available for Round Robin and Group Stage + Playoff tournaments.");
+        }
+
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("Tie-breakers can only be resolved while the tournament is Running.");
+        }
+
+        if (Type == TournamentType.GroupStagePlayoff && PlayoffStarted)
+        {
+            throw new DomainException("The playoff has already started.");
+        }
+
+        if (!GroupStageDecided)
+        {
+            throw new DomainException("Every round-robin match must be decided before resolving tie-breakers.");
+        }
+
+        if (!TiebreakerMatches.All(IsDecided))
+        {
+            throw new DomainException("Play out the current tie-breaker matches before generating more.");
+        }
+
+        var cohorts = UnresolvedTieCohorts();
+        if (cohorts.Count == 0)
+        {
+            throw new DomainException("There are no ties that require a tie-breaker.");
+        }
+
+        foreach (var (groupIndex, members) in cohorts)
+        {
+            // A previous wave may already occupy rounds 1..n for this scope (a tie-breaker round can
+            // itself end in a cycle), so continue numbering after it rather than colliding with it.
+            var played = _matches.Where(m => m.Segment == BracketSegment.Tiebreaker && m.GroupIndex == groupIndex).ToList();
+            var roundOffset = played.Count == 0 ? 0 : played.Max(m => m.Round);
+
+            _matches.AddRange(RoundRobinBracket.Schedule(
+                Id, members, MatchFormat.Bo1, DefaultScoreType, groupIndex, BracketSegment.Tiebreaker, roundOffset));
+        }
+    }
+
+    private IEnumerable<Match> TiebreakerMatches => _matches.Where(m => m.Segment == BracketSegment.Tiebreaker);
+
+    /// <summary>The round-robin and tie-breaker matches for one scope: a single group (Group Stage + Playoff) or the whole field (Round Robin, <paramref name="groupIndex"/> null).</summary>
+    private IEnumerable<Match> ScopeMatches(int? groupIndex) =>
+        _matches.Where(m =>
+            (m.Segment == BracketSegment.RoundRobin || m.Segment == BracketSegment.Tiebreaker)
+            && (groupIndex is null || m.GroupIndex == groupIndex));
+
+    /// <summary>
+    /// Round Robin and Group Stage + Playoff only: whether a standings tie that changes an outcome is
+    /// still unresolved and needs played tie-breaker matches (none have been generated yet).
+    /// </summary>
+    public bool NeedsTiebreakers
+    {
+        get
+        {
+            // A wave that is still being played is not a reason to generate another one.
+            if (Status != TournamentStatus.Running || !GroupStageDecided || !TiebreakerMatches.All(IsDecided))
+            {
+                return false;
+            }
+
+            if (Type == TournamentType.GroupStagePlayoff)
+            {
+                return !PlayoffStarted && UnresolvedTieCohorts().Count > 0;
+            }
+
+            return Type == TournamentType.RoundRobin && UnresolvedTieCohorts().Count > 0;
+        }
+    }
+
+    /// <summary>The tied cohorts (with their group, null for Round Robin) that need played tie-breaker matches under the current policy.</summary>
+    private List<(int? GroupIndex, IReadOnlyList<Guid> Members)> UnresolvedTieCohorts()
+    {
+        var roster = _participants.ToDictionary(p => p.Id);
+        var result = new List<(int?, IReadOnlyList<Guid>)>();
+
+        if (Type == TournamentType.GroupStagePlayoff)
+        {
+            var capacity = GroupStagePlayoffBracket.PlayoffCapacity(_participants.Count);
+            var sizes = CurrentGroupSizes();
+            var levels = GroupStagePlayoffBracket.PlanLevels(sizes, capacity);
+
+            // A group placement only needs playing off when finishing one place lower would change the
+            // participant's fate (Winner Bracket, Loser Bracket, eliminated, or into a contested level).
+            for (var g = 0; g < GroupCount; g++)
+            {
+                var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
+                var cuts = GroupStagePlayoffBracket.GroupBoundaryCuts(levels, sizes[g]);
+                foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(ScopeMatches(g), groupParticipants, roster, TiebreakerPolicy, cuts))
+                {
+                    result.Add((g, cohort));
+                }
+            }
+
+            // Group placements have to be settled before the cross-group contests can even be identified.
+            if (result.Count == 0)
+            {
+                result.AddRange(UnresolvedContestedLevels(levels, capacity).Select(members => ((int?)null, members)));
+            }
+        }
+        else
+        {
+            // Round Robin: only podium (top-3) ties are played out.
+            var cuts = new[] { 1, 2, 3 };
+            foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(ScopeMatches(null), _participants, roster, TiebreakerPolicy, cuts))
+            {
+                result.Add((null, cohort));
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>Whether the group stage exists and every one of its matches is decided (single pass over the match list).</summary>
     private bool GroupStageDecided
@@ -381,6 +611,9 @@ public class Tournament
     /// </summary>
     private bool UsesStoredRoutes => Type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff;
 
+    /// <summary>A flat, unrouted match with no dependents - a Round Robin/group-stage match or a tie-breaker match. It never advances anyone and its undo needs only the latest-decided check.</summary>
+    private static bool IsFlatSegment(BracketSegment segment) => segment is BracketSegment.RoundRobin or BracketSegment.Tiebreaker;
+
     /// <summary>
     /// Double Elimination only: the Loser Bracket Final's decided loser - there is no separate
     /// Third Place match (BR-008). Null if undecided, or if this participant count's bye cascade
@@ -418,9 +651,9 @@ public class Tournament
             return false;
         }
 
-        if (match.Segment == BracketSegment.RoundRobin)
+        if (IsFlatSegment(match.Segment))
         {
-            // Round Robin / group-stage matches have no dependents; the latest-decided check suffices.
+            // Round Robin / group-stage / tie-breaker matches have no dependents; the latest-decided check suffices.
             return true;
         }
 
@@ -453,8 +686,8 @@ public class Tournament
 
         var (winnerId, loserId) = WinnerAndLoser(match);
 
-        // Round Robin / group-stage matches feed nothing, so there is no dependent slot to clear.
-        if (match.Segment != BracketSegment.RoundRobin && UsesStoredRoutes)
+        // Round Robin / group-stage / tie-breaker matches feed nothing, so there is no dependent slot to clear.
+        if (!IsFlatSegment(match.Segment) && UsesStoredRoutes)
         {
             var (winnerRouteMatch, winnerRouteSlotA, loserRouteMatch, loserRouteSlotA) = FindUndoDependentsDoubleElimination(match);
 
@@ -466,7 +699,7 @@ public class Tournament
             winnerRouteMatch?.ClearSlot(winnerRouteSlotA, winnerId);
             loserRouteMatch?.ClearSlot(loserRouteSlotA, loserId);
         }
-        else if (match.Segment != BracketSegment.RoundRobin)
+        else if (!IsFlatSegment(match.Segment))
         {
             var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
 
@@ -489,9 +722,9 @@ public class Tournament
 
     private void Advance(Match match)
     {
-        if (match.Segment == BracketSegment.RoundRobin)
+        if (IsFlatSegment(match.Segment))
         {
-            // Round Robin / group-stage matches never feed into another match.
+            // Round Robin / group-stage / tie-breaker matches never feed into another match.
             return;
         }
 
@@ -555,7 +788,7 @@ public class Tournament
 
         if (Type == TournamentType.RoundRobin)
         {
-            return _matches.All(IsDecided);
+            return _matches.All(IsDecided) && !NeedsTiebreakers;
         }
 
         var rounds = TotalRounds();
@@ -648,7 +881,8 @@ public class Tournament
         MatchFormat defaultMatchFormat,
         ScoreType defaultScoreType,
         bool thirdPlaceEnabled,
-        int groupCount)
+        int groupCount,
+        TiebreakerPolicy tiebreakerPolicy)
     {
         name = (name ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(name))
@@ -690,6 +924,7 @@ public class Tournament
         DefaultScoreType = defaultScoreType;
         ThirdPlaceEnabled = type == TournamentType.SingleElimination && thirdPlaceEnabled;
         GroupCount = type == TournamentType.GroupStagePlayoff ? groupCount : 0;
+        TiebreakerPolicy = tiebreakerPolicy;
     }
 
     private void EnsurePlanned(string action)

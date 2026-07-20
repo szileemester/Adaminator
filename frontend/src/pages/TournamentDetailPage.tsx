@@ -21,7 +21,8 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import FastForwardIcon from '@mui/icons-material/FastForward';
-import { deleteTournament, finishTournament, getBracket, getTournament, startPlayoffs } from '../api/tournaments';
+import BalanceIcon from '@mui/icons-material/Balance';
+import { deleteTournament, finishTournament, getBracket, getTournament, startPlayoffs, startTiebreakers } from '../api/tournaments';
 import { extractErrorMessage } from '../api/client';
 import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
 import { StatusChip } from '../components/StatusChip';
@@ -38,6 +39,7 @@ export function TournamentDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmFinishOpen, setConfirmFinishOpen] = useState(false);
   const [confirmPlayoffsOpen, setConfirmPlayoffsOpen] = useState(false);
+  const [confirmTiebreakersOpen, setConfirmTiebreakersOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -62,36 +64,31 @@ export function TournamentDetailPage() {
     enabled: Boolean(tournament) && !isPlanned,
   });
 
-  const finishMutation = useMutation({
-    mutationFn: () => finishTournament(id),
+  /**
+   * The three bracket actions (finish / start playoffs / resolve tie-breakers) differ only in the call
+   * they make and the confirm dialog they close - refreshing and error handling are identical. This
+   * builds the shared options; the useMutation calls stay top-level so hook order never varies.
+   * `alsoRefreshList` is for Finish, which also changes the status shown on the dashboard.
+   */
+  const bracketAction = (action: () => Promise<unknown>, closeDialog: (open: boolean) => void, alsoRefreshList = false) => ({
+    mutationFn: action,
     onSuccess: async () => {
-      setConfirmFinishOpen(false);
+      closeDialog(false);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tournaments'] }),
+        ...(alsoRefreshList ? [queryClient.invalidateQueries({ queryKey: ['tournaments'] })] : []),
         queryClient.invalidateQueries({ queryKey: ['tournaments', id] }),
         queryClient.invalidateQueries({ queryKey: ['bracket', id] }),
       ]);
     },
-    onError: (err) => {
-      setConfirmFinishOpen(false);
+    onError: (err: unknown) => {
+      closeDialog(false);
       setActionError(extractErrorMessage(err));
     },
   });
 
-  const startPlayoffsMutation = useMutation({
-    mutationFn: () => startPlayoffs(id),
-    onSuccess: async () => {
-      setConfirmPlayoffsOpen(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tournaments', id] }),
-        queryClient.invalidateQueries({ queryKey: ['bracket', id] }),
-      ]);
-    },
-    onError: (err) => {
-      setConfirmPlayoffsOpen(false);
-      setActionError(extractErrorMessage(err));
-    },
-  });
+  const finishMutation = useMutation(bracketAction(() => finishTournament(id), setConfirmFinishOpen, true));
+  const startPlayoffsMutation = useMutation(bracketAction(() => startPlayoffs(id), setConfirmPlayoffsOpen));
+  const startTiebreakersMutation = useMutation(bracketAction(() => startTiebreakers(id), setConfirmTiebreakersOpen));
 
   if (isLoading) {
     return (
@@ -175,6 +172,17 @@ export function TournamentDetailPage() {
               <Typography variant="h6">Bracket</Typography>
               {tournament.status === 'Running' && (
                 <Stack direction="row" spacing={1}>
+                  {bracket?.needsTiebreakers && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="warning"
+                      startIcon={<BalanceIcon />}
+                      onClick={() => setConfirmTiebreakersOpen(true)}
+                    >
+                      Resolve tie-breakers
+                    </Button>
+                  )}
                   {bracket?.canStartPlayoffs && (
                     <Button
                       size="small"
@@ -265,6 +273,17 @@ export function TournamentDetailPage() {
         busy={startPlayoffsMutation.isPending}
         onCancel={() => setConfirmPlayoffsOpen(false)}
         onConfirm={() => startPlayoffsMutation.mutate()}
+      />
+
+      <ConfirmDialog
+        open={confirmTiebreakersOpen}
+        title="Resolve tie-breakers"
+        message="This generates the Bo1 tie-breaker matches needed to break a standings tie that changes an outcome. Play them out, then the standings and seeding settle."
+        confirmLabel="Generate tie-breakers"
+        confirmColor="warning"
+        busy={startTiebreakersMutation.isPending}
+        onCancel={() => setConfirmTiebreakersOpen(false)}
+        onConfirm={() => startTiebreakersMutation.mutate()}
       />
 
       <Snackbar

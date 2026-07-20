@@ -14,6 +14,7 @@ internal static class TournamentMappings
         tournament.ThirdPlaceEnabled,
         tournament.DefaultScoreType,
         tournament.GroupCount,
+        tournament.TiebreakerPolicy,
         tournament.Status,
         tournament.PublicToken,
         tournament.CreatedAt);
@@ -34,6 +35,7 @@ internal static class TournamentMappings
         tournament.DefaultMatchFormat,
         tournament.DefaultScoreType,
         tournament.GroupCount,
+        tournament.TiebreakerPolicy,
         tournament.Status,
         tournament.Participants.ToOrderedDtos(),
         tournament.Matches.Count > 0 ? BracketProjection.Build(tournament) : null);

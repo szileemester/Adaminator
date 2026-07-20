@@ -11,8 +11,8 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
-import type { MatchFormat, ScoreType, TournamentInput, TournamentType } from '../api/types';
-import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
+import type { MatchFormat, ScoreType, TiebreakerPolicy, TournamentInput, TournamentType } from '../api/types';
+import { matchFormatLabels, scoreTypeLabels, tiebreakerPolicyLabels, tournamentTypeLabels } from '../api/types';
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(200, 'Name is too long'),
@@ -23,6 +23,7 @@ const schema = z.object({
   thirdPlaceEnabled: z.boolean(),
   defaultScoreType: z.enum(['WinnerOnly', 'Games', 'Points', 'Sets']),
   groupCount: z.number().int('Enter a whole number').min(2, 'At least 2 groups').max(16, 'At most 16 groups'),
+  tiebreakerPolicy: z.enum(['ComputedThenMatch', 'AlwaysMatch']),
 });
 
 export type TournamentFormValues = z.infer<typeof schema>;
@@ -32,6 +33,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const matchFormats: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
 const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination', 'RoundRobin', 'GroupStagePlayoff'];
 const scoreTypes: ScoreType[] = ['Games', 'Sets', 'Points', 'WinnerOnly'];
+const tiebreakerPolicies: TiebreakerPolicy[] = ['ComputedThenMatch', 'AlwaysMatch'];
 
 interface TournamentFormProps {
   initialValues?: Partial<TournamentFormValues>;
@@ -66,6 +68,7 @@ export function TournamentForm({
       thirdPlaceEnabled: false,
       defaultScoreType: 'Games',
       groupCount: 2,
+      tiebreakerPolicy: 'ComputedThenMatch',
       ...initialValues,
     },
   });
@@ -73,6 +76,8 @@ export function TournamentForm({
   const selectedType = watch('type');
   const isSingleElimination = selectedType === 'SingleElimination';
   const isGroupStagePlayoff = selectedType === 'GroupStagePlayoff';
+  // Only Round Robin and Group Stage + Playoff produce round-robin standings that can tie in a way that matters.
+  const showsTiebreakerPolicy = selectedType === 'RoundRobin' || isGroupStagePlayoff;
   const selectedFormat = watch('defaultMatchFormat');
   const selectedScoreType = watch('defaultScoreType');
   const isBo1 = selectedFormat === 'Bo1';
@@ -101,6 +106,7 @@ export function TournamentForm({
       thirdPlaceEnabled: values.type === 'SingleElimination' && values.thirdPlaceEnabled,
       defaultScoreType: values.defaultMatchFormat !== 'Bo1' && values.defaultScoreType === 'WinnerOnly' ? 'Games' : values.defaultScoreType,
       groupCount: values.type === 'GroupStagePlayoff' ? values.groupCount : 0,
+      tiebreakerPolicy: values.tiebreakerPolicy,
     });
   });
 
@@ -175,7 +181,7 @@ export function TournamentForm({
             error={Boolean(errors.groupCount)}
             helperText={
               errors.groupCount?.message ??
-              'Participants are drawn randomly into this many groups. Requires a power-of-two roster (4/8/16/32) that divides evenly.'
+              'Participants are drawn randomly into this many groups; sizes may differ by one. The largest power of two that fits (4/8/16/32) reaches the playoff - anyone below that is knocked out at the group stage.'
             }
           />
         )}
@@ -193,6 +199,28 @@ export function TournamentForm({
             />
           )}
         />
+
+        {showsTiebreakerPolicy && (
+          <Controller
+            name="tiebreakerPolicy"
+            control={control}
+            render={({ field }) => (
+              <TextField
+                select
+                label="Tie-breaker"
+                {...field}
+                sx={{ gridColumn: '1 / -1' }}
+                helperText="How a standings tie that changes an outcome (the Upper/Lower split, or a podium place) is resolved."
+              >
+                {tiebreakerPolicies.map((policy) => (
+                  <MenuItem key={policy} value={policy}>
+                    {tiebreakerPolicyLabels[policy]}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+          />
+        )}
 
         <TextField
           label="Date"

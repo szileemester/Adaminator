@@ -38,11 +38,19 @@ public static class RoundRobinBracket
     /// position 0 stays fixed and the remaining positions rotate by one after each round; each round
     /// pairs position i with position (n-1-i). Whichever real participant lands opposite the virtual
     /// empty slot sits out that round - no <see cref="Match"/> row is created for it, mirroring how
-    /// Single/Double Elimination create no match for a bye pairing. Shared by plain Round Robin and
-    /// the Group Stage + Playoff per-group scheduling (which tags each match with its group via
-    /// <paramref name="groupIndex"/>).
+    /// Single/Double Elimination create no match for a bye pairing. Shared by plain Round Robin, the
+    /// Group Stage + Playoff per-group scheduling (which tags each match with its group via
+    /// <paramref name="groupIndex"/>), and the tie-breaker mini round-robins (which pass
+    /// <paramref name="segment"/> <see cref="BracketSegment.Tiebreaker"/>).
     /// </summary>
-    public static List<Match> Schedule(Guid tournamentId, IReadOnlyList<Guid> orderedIds, MatchFormat format, ScoreType scoreType, int? groupIndex)
+    public static List<Match> Schedule(
+        Guid tournamentId,
+        IReadOnlyList<Guid> orderedIds,
+        MatchFormat format,
+        ScoreType scoreType,
+        int? groupIndex,
+        BracketSegment segment = BracketSegment.RoundRobin,
+        int roundOffset = 0)
     {
         var slots = orderedIds.Select(id => (Guid?)id).ToList();
         if (slots.Count % 2 != 0)
@@ -63,7 +71,7 @@ public static class RoundRobinBracket
                 var b = slots[n - 1 - i];
                 if (a is not null && b is not null)
                 {
-                    matches.Add(Match.Create(tournamentId, BracketSegment.RoundRobin, round, indexInRound, a, b, format, scoreType, groupIndex));
+                    matches.Add(Match.Create(tournamentId, segment, round + roundOffset, indexInRound, a, b, format, scoreType, groupIndex));
                     indexInRound++;
                 }
             }

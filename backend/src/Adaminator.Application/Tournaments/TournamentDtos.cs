@@ -11,7 +11,8 @@ public record CreateTournamentRequest(
     MatchFormat DefaultMatchFormat,
     bool ThirdPlaceEnabled,
     ScoreType DefaultScoreType = ScoreType.Games,
-    int GroupCount = 0);
+    int GroupCount = 0,
+    TiebreakerPolicy TiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch);
 
 /// <summary>Payload for editing a Planned tournament (FR-TOUR-002).</summary>
 public record UpdateTournamentRequest(
@@ -22,7 +23,8 @@ public record UpdateTournamentRequest(
     MatchFormat DefaultMatchFormat,
     bool ThirdPlaceEnabled,
     ScoreType DefaultScoreType = ScoreType.Games,
-    int GroupCount = 0);
+    int GroupCount = 0,
+    TiebreakerPolicy TiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch);
 
 /// <summary>Full admin-facing representation of a tournament.</summary>
 public record TournamentDto(
@@ -35,6 +37,7 @@ public record TournamentDto(
     bool ThirdPlaceEnabled,
     ScoreType DefaultScoreType,
     int GroupCount,
+    TiebreakerPolicy TiebreakerPolicy,
     TournamentStatus Status,
     string PublicToken,
     DateTimeOffset CreatedAt);
@@ -57,6 +60,7 @@ public record PublicTournamentDto(
     MatchFormat DefaultMatchFormat,
     ScoreType DefaultScoreType,
     int GroupCount,
+    TiebreakerPolicy TiebreakerPolicy,
     TournamentStatus Status,
     IReadOnlyList<ParticipantDto> Participants,
     BracketDto? Bracket);

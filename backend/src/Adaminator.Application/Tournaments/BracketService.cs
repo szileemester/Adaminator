@@ -73,6 +73,15 @@ public class BracketService
         return tournament.ToDto();
     }
 
+    /// <summary>Round Robin and Group Stage + Playoff: generates the played tie-breaker matches needed to resolve standings ties (rejected when none are needed or already generated).</summary>
+    public async Task<TournamentDto> StartTiebreakersAsync(Guid tournamentId, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.StartTiebreakers();
+        await _repository.SaveChangesAsync(cancellationToken);
+        return tournament.ToDto();
+    }
+
     /// <summary>Manually finishes a Running tournament once the admin decides it's over (rejected until every deciding match is decided).</summary>
     public async Task<TournamentDto> FinishAsync(Guid tournamentId, CancellationToken cancellationToken = default)
     {

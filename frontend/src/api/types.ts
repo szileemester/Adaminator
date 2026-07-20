@@ -1,6 +1,8 @@
 export type TournamentType = 'SingleElimination' | 'DoubleElimination' | 'RoundRobin' | 'GroupStagePlayoff';
 export type MatchFormat = 'Bo1' | 'Bo3' | 'Bo5' | 'Bo7';
 export type TournamentStatus = 'Planned' | 'Running' | 'Finished';
+/** How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff. */
+export type TiebreakerPolicy = 'ComputedThenMatch' | 'AlwaysMatch';
 
 export interface TournamentSummary {
   id: string;
@@ -22,13 +24,15 @@ export interface Tournament {
   defaultScoreType: ScoreType;
   /** Group Stage + Playoff only: number of groups; 0 for other types. */
   groupCount: number;
+  /** Round Robin + Group Stage + Playoff: how standings ties are resolved. */
+  tiebreakerPolicy: TiebreakerPolicy;
   status: TournamentStatus;
   publicToken: string;
   createdAt: string;
 }
 
 export type MatchStatus = 'Pending' | 'InProgress' | 'Completed' | 'Forfeit';
-export type BracketSegment = 'Winner' | 'Loser' | 'GrandFinal' | 'ThirdPlace' | 'RoundRobin';
+export type BracketSegment = 'Winner' | 'Loser' | 'GrandFinal' | 'ThirdPlace' | 'RoundRobin' | 'Tiebreaker';
 
 export interface Participant {
   id: string;
@@ -98,11 +102,13 @@ export interface PlacementGroup {
   participants: BracketSlot[];
 }
 
-/** Group Stage + Playoff only: one group's round-robin schedule and standings. */
+/** Group Stage + Playoff only: one group's round-robin schedule, standings, and any played tie-breaker matches. */
 export interface Group {
   groupIndex: number;
   rounds: BracketRound[];
   standings: StandingRow[];
+  /** Played tie-breaker matches for this group; empty unless a straddling tie needed resolving. */
+  tiebreakerRounds: BracketRound[];
 }
 
 export interface Bracket {
@@ -124,6 +130,10 @@ export interface Bracket {
   placements: PlacementGroup[];
   /** Group Stage + Playoff only: each group's schedule + standings; empty for other types. */
   groups: Group[];
+  /** Round Robin only: played tie-breaker matches; Group Stage + Playoff carries these per-group on each Group. */
+  tiebreakerRounds: BracketRound[];
+  /** Round Robin + Group Stage + Playoff: true when a standings tie needs played tie-breaker matches generated. */
+  needsTiebreakers: boolean;
   /** Group Stage + Playoff only: true once the group stage is done and the admin can generate the playoff. */
   canStartPlayoffs: boolean;
   /** True once every deciding match is decided and the admin can finish the tournament by hand. */
@@ -138,6 +148,7 @@ export interface PublicTournament {
   defaultMatchFormat: MatchFormat;
   defaultScoreType: ScoreType;
   groupCount: number;
+  tiebreakerPolicy: TiebreakerPolicy;
   status: TournamentStatus;
   participants: Participant[];
   bracket: Bracket | null;
@@ -176,6 +187,7 @@ export interface TournamentInput {
   thirdPlaceEnabled: boolean;
   defaultScoreType: ScoreType;
   groupCount: number;
+  tiebreakerPolicy: TiebreakerPolicy;
 }
 
 export const tournamentTypeLabels: Record<TournamentType, string> = {
@@ -190,6 +202,11 @@ export const matchFormatLabels: Record<MatchFormat, string> = {
   Bo3: 'Best of 3',
   Bo5: 'Best of 5',
   Bo7: 'Best of 7',
+};
+
+export const tiebreakerPolicyLabels: Record<TiebreakerPolicy, string> = {
+  ComputedThenMatch: 'Head-to-head, then a decider match',
+  AlwaysMatch: 'Always play a decider match',
 };
 
 export const tournamentStatusLabels: Record<TournamentStatus, string> = {
