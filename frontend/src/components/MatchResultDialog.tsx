@@ -18,7 +18,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { BracketMatch, MatchFormat, ScoreType } from '../api/types';
-import { formatParticipantName, matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
+import { allowsDraw, formatParticipantName, matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
 import { completeMatch, forfeitMatch, saveMatchResult, undoMatch } from '../api/matches';
 import type { ScoreEntryInput } from '../api/matches';
 import { extractErrorMessage } from '../api/client';
@@ -64,12 +64,14 @@ interface GameProgress {
   played: GameSlot[];
   playedWinsA: number;
   playedWinsB: number;
-  isDecisive: boolean;
-  /** One panel enabled at a time: the played ones, plus exactly one more to play next - unless the match is already decided, in which case no further panel is needed. */
+  /** Whether the result can be submitted: someone reached the required wins, or (a draw-capable format) every game is played. */
+  canComplete: boolean;
+  /** How many game panels are interactive: for a decisive format one ahead of what's filled and it stops once decided; a draw-capable format keeps them all open (both games are always played). */
   enabledCount: number;
 }
 
-function computeGameProgress(entries: GameSlot[], scoreType: ScoreType | null, required: number, maxGames: number): GameProgress {
+function computeGameProgress(
+  entries: GameSlot[], scoreType: ScoreType | null, required: number, maxGames: number, drawCapable: boolean): GameProgress {
   const isFilled = (slot: GameSlot) =>
     scoreType === 'Points'
       ? slot.scoreA != null && slot.scoreB != null && slot.scoreA !== slot.scoreB
@@ -85,10 +87,13 @@ function computeGameProgress(entries: GameSlot[], scoreType: ScoreType | null, r
   const played = entries.slice(0, filledCount);
   const playedWinsA = played.filter((e) => e.participantAWon === true).length;
   const playedWinsB = filledCount - playedWinsA;
-  const isDecisive = playedWinsA >= required || playedWinsB >= required;
-  const enabledCount = isDecisive ? filledCount : Math.min(filledCount + 1, maxGames);
+  // A draw-capable match (Best of 2) plays every game and may end level, so it is complete once all
+  // games are entered regardless of who won; a decisive one completes as soon as someone clinches.
+  const decisive = playedWinsA >= required || playedWinsB >= required;
+  const canComplete = drawCapable ? filledCount === maxGames : decisive;
+  const enabledCount = drawCapable ? maxGames : decisive ? filledCount : Math.min(filledCount + 1, maxGames);
 
-  return { filledCount, played, playedWinsA, playedWinsB, isDecisive, enabledCount };
+  return { filledCount, played, playedWinsA, playedWinsB, canComplete, enabledCount };
 }
 
 interface MatchResultDialogProps {
@@ -119,11 +124,13 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
 
   const maxGames = matchFormatGameCount(matchFormat);
   const required = requiredWins(matchFormat);
-  const { filledCount, played, playedWinsA, playedWinsB, isDecisive, enabledCount } = computeGameProgress(
+  const drawCapable = allowsDraw(matchFormat);
+  const { filledCount, played, playedWinsA, playedWinsB, canComplete, enabledCount } = computeGameProgress(
     entries,
     scoreType,
     required,
     maxGames,
+    drawCapable,
   );
 
   const invalidateBracket = () => queryClient.invalidateQueries({ queryKey: ['bracket', tournamentId] });
@@ -232,7 +239,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                 {match.aggregateScoreA} – {match.aggregateScoreB}
               </Typography>
               <Typography variant="body2">
-                Winner: {match.winnerId === match.participantA?.participantId ? nameA : nameB}
+                {match.winnerId === null ? 'Draw' : `Winner: ${match.winnerId === match.participantA?.participantId ? nameA : nameB}`}
               </Typography>
             </Stack>
           ) : (
@@ -378,7 +385,10 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
 
               {scoreType != null && (
                 <Typography variant="body2" color="text.secondary">
-                  Aggregate: {playedWinsA} – {playedWinsB} (needs {required} to win)
+                  Aggregate: {playedWinsA} – {playedWinsB}
+                  {drawCapable
+                    ? ` (all ${maxGames} games; a ${maxGames / 2}-${maxGames / 2} is a draw)`
+                    : ` (needs ${required} to win)`}
                 </Typography>
               )}
 
@@ -414,7 +424,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
             <Button onClick={() => saveMutation.mutate()} disabled={busy || scoreType == null}>
               Save
             </Button>
-            <Button variant="contained" onClick={() => completeMutation.mutate()} disabled={busy || scoreType == null || !isDecisive}>
+            <Button variant="contained" onClick={() => completeMutation.mutate()} disabled={busy || scoreType == null || !canComplete}>
               Complete
             </Button>
           </>

@@ -40,6 +40,12 @@ public class Tournament
     /// <summary>How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff.</summary>
     public TiebreakerPolicy TiebreakerPolicy { get; private set; }
 
+    /// <summary>Group Stage + Playoff only: how the group matches are played and scored (decisive, or Best-of-2 ranked by games won). Standard for every other type.</summary>
+    public GroupStageFormat GroupStageFormat { get; private set; }
+
+    /// <summary>Whether group standings rank by total games won (Best-of-2 group stage) rather than match wins.</summary>
+    public bool RanksGroupsByGamesWon => GroupStageFormat == GroupStageFormat.BestOfTwo;
+
     public TournamentStatus Status { get; private set; }
 
     /// <summary>
@@ -66,7 +72,8 @@ public class Tournament
         bool thirdPlaceEnabled,
         DateTimeOffset createdAt,
         int groupCount = 0,
-        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch)
+        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
+        GroupStageFormat groupStageFormat = GroupStageFormat.Standard)
     {
         var tournament = new Tournament
         {
@@ -76,7 +83,7 @@ public class Tournament
             CreatedAt = createdAt
         };
 
-        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy);
+        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy, groupStageFormat);
         return tournament;
     }
 
@@ -90,10 +97,11 @@ public class Tournament
         ScoreType defaultScoreType,
         bool thirdPlaceEnabled,
         int groupCount = 0,
-        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch)
+        TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
+        GroupStageFormat groupStageFormat = GroupStageFormat.Standard)
     {
         EnsurePlanned("edited");
-        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy);
+        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy, groupStageFormat);
     }
 
     // ---- Participant management (Planned only) ----
@@ -367,7 +375,7 @@ public class Tournament
         for (var g = 0; g < GroupCount; g++)
         {
             var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
-            standings.Add(RoundRobinStandings.Rank(ScopeMatches(g), groupParticipants, roster).Select(r => r.ParticipantId).ToList());
+            standings.Add(RoundRobinStandings.Rank(ScopeMatches(g), groupParticipants, roster, RanksGroupsByGamesWon).Select(r => r.ParticipantId).ToList());
         }
 
         return standings;
@@ -549,7 +557,7 @@ public class Tournament
             {
                 var groupParticipants = _participants.Where(p => p.GroupIndex == g).ToList();
                 var cuts = GroupStagePlayoffBracket.GroupBoundaryCuts(levels, sizes[g]);
-                foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(ScopeMatches(g), groupParticipants, roster, TiebreakerPolicy, cuts))
+                foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(ScopeMatches(g), groupParticipants, roster, TiebreakerPolicy, cuts, RanksGroupsByGamesWon))
                 {
                     result.Add((g, cohort));
                 }
@@ -684,32 +692,36 @@ public class Tournament
             throw new DomainException("Only the most recently completed match can be undone.");
         }
 
-        var (winnerId, loserId) = WinnerAndLoser(match);
-
-        // Round Robin / group-stage / tie-breaker matches feed nothing, so there is no dependent slot to clear.
-        if (!IsFlatSegment(match.Segment) && UsesStoredRoutes)
+        // Round Robin / group-stage / tie-breaker matches feed nothing, so there is no dependent slot
+        // to clear - and a drawn Best-of-2 group match has no winner/loser to read anyway.
+        if (!IsFlatSegment(match.Segment))
         {
-            var (winnerRouteMatch, winnerRouteSlotA, loserRouteMatch, loserRouteSlotA) = FindUndoDependentsDoubleElimination(match);
+            var (winnerId, loserId) = WinnerAndLoser(match);
 
-            if (IsBlockedFrom(winnerRouteMatch, loserRouteMatch))
+            if (UsesStoredRoutes)
             {
-                throw new DomainException("This match cannot be undone because a dependent match has already started.");
+                var (winnerRouteMatch, winnerRouteSlotA, loserRouteMatch, loserRouteSlotA) = FindUndoDependentsDoubleElimination(match);
+
+                if (IsBlockedFrom(winnerRouteMatch, loserRouteMatch))
+                {
+                    throw new DomainException("This match cannot be undone because a dependent match has already started.");
+                }
+
+                winnerRouteMatch?.ClearSlot(winnerRouteSlotA, winnerId);
+                loserRouteMatch?.ClearSlot(loserRouteSlotA, loserId);
             }
-
-            winnerRouteMatch?.ClearSlot(winnerRouteSlotA, winnerId);
-            loserRouteMatch?.ClearSlot(loserRouteSlotA, loserId);
-        }
-        else if (!IsFlatSegment(match.Segment))
-        {
-            var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
-
-            if (IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch))
+            else
             {
-                throw new DomainException("This match cannot be undone because a dependent match has already started.");
-            }
+                var (nextWinnerMatch, nextWinnerSlotA, thirdPlaceMatch) = FindUndoDependents(match);
 
-            nextWinnerMatch?.ClearSlot(nextWinnerSlotA, winnerId);
-            thirdPlaceMatch?.ClearSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+                if (IsBlockedFrom(nextWinnerMatch, thirdPlaceMatch))
+                {
+                    throw new DomainException("This match cannot be undone because a dependent match has already started.");
+                }
+
+                nextWinnerMatch?.ClearSlot(nextWinnerSlotA, winnerId);
+                thirdPlaceMatch?.ClearSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
+            }
         }
 
         if (Status == TournamentStatus.Finished)
@@ -882,7 +894,8 @@ public class Tournament
         ScoreType defaultScoreType,
         bool thirdPlaceEnabled,
         int groupCount,
-        TiebreakerPolicy tiebreakerPolicy)
+        TiebreakerPolicy tiebreakerPolicy,
+        GroupStageFormat groupStageFormat)
     {
         name = (name ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(name))
@@ -925,6 +938,7 @@ public class Tournament
         ThirdPlaceEnabled = type == TournamentType.SingleElimination && thirdPlaceEnabled;
         GroupCount = type == TournamentType.GroupStagePlayoff ? groupCount : 0;
         TiebreakerPolicy = tiebreakerPolicy;
+        GroupStageFormat = type == TournamentType.GroupStagePlayoff ? groupStageFormat : GroupStageFormat.Standard;
     }
 
     private void EnsurePlanned(string action)

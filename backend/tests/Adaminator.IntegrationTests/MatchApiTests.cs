@@ -517,6 +517,54 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Best_of_two_group_records_a_draw_and_ranks_by_games_won()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var create = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = $"Major {Guid.NewGuid():N}",
+            date = "2026-07-21",
+            type = "GroupStagePlayoff",
+            defaultMatchFormat = "Bo3",
+            thirdPlaceEnabled = false,
+            defaultScoreType = "Games",
+            groupCount = 2,
+            groupStageFormat = "BestOfTwo"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+
+        foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H" })
+        {
+            await client.PostAsJsonAsync($"/api/tournaments/{tournamentId}/participants", new { name });
+        }
+
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/bracket/draw-groups", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var group = await GetBracketAsync(client, tournamentId);
+        var groupMatches = group.Groups.SelectMany(g => g.Rounds).SelectMany(r => r.Matches).ToList();
+        groupMatches.Should().OnlyContain(m => m.MatchFormat == "Bo2");
+
+        // Play the first match as a 1-1 draw (two games, one each) over the wire.
+        var draw = groupMatches[0];
+        (await client.PostAsJsonAsync(
+            $"/api/tournaments/{tournamentId}/matches/{draw.Id}/complete",
+            new { matchFormat = "Bo2", scoreType = "Games", entries = new[] { Entry(true), Entry(false) } }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var afterDraw = await GetBracketAsync(client, tournamentId);
+        var completed = afterDraw.Groups.SelectMany(g => g.Rounds).SelectMany(r => r.Matches).Single(m => m.Id == draw.Id);
+        completed.Status.Should().Be("Completed");
+        completed.WinnerId.Should().BeNull(); // a draw
+        // Both drawn participants show one game won and no match win.
+        var drawnIds = new[] { draw.ParticipantA!.ParticipantId, draw.ParticipantB!.ParticipantId };
+        var drawnRows = afterDraw.Groups.SelectMany(g => g.Standings).Where(s => drawnIds.Contains(s.ParticipantId)).ToList();
+        drawnRows.Should().OnlyContain(s => s.GamesWon == 1 && s.Wins == 0 && s.Played == 1);
+    }
+
+    [Fact]
     public async Task Group_stage_playoff_rejects_fewer_than_two_groups()
     {
         var client = await CreateAuthenticatedClientAsync();
@@ -649,7 +697,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         DateTimeOffset? CompletedAt, bool CanUndo);
     private record RoundResponse(int Round, string Title, List<MatchResponse> Matches);
     private record PlacementGroupResponse(int RankStart, int RankEnd, string Label, List<ParticipantSlotResponse> Participants);
-    private record StandingRowResponse(int Rank, Guid ParticipantId, string Name, int Played, int Wins, int Losses);
+    private record StandingRowResponse(int Rank, Guid ParticipantId, string Name, int Played, int Wins, int Losses, int GamesWon);
     private record GroupResponse(int GroupIndex, List<RoundResponse> Rounds, List<StandingRowResponse> Standings, List<RoundResponse> TiebreakerRounds);
     private record BracketResponse(
         List<RoundResponse> WinnerRounds,

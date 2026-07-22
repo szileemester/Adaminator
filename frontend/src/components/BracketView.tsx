@@ -965,6 +965,7 @@ function StandingsTable({
               <TableCell align="right">Played</TableCell>
               <TableCell align="right">Wins</TableCell>
               <TableCell align="right">Losses</TableCell>
+              <TableCell align="right">Games</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -1007,6 +1008,7 @@ function StandingsTable({
                   <TableCell align="right">{row.played}</TableCell>
                   <TableCell align="right">{row.wins}</TableCell>
                   <TableCell align="right">{row.losses}</TableCell>
+                  <TableCell align="right">{row.gamesWon}</TableCell>
                 </TableRow>
               );
             })}

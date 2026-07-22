@@ -3,32 +3,33 @@ using Adaminator.Domain.Enums;
 
 namespace Adaminator.Domain.Brackets;
 
-/// <summary>A participant's win-loss record within a round-robin (or one group of a group stage).</summary>
-public readonly record struct RoundRobinStanding(Guid ParticipantId, int Wins, int Losses)
-{
-    public int Played => Wins + Losses;
-}
+/// <summary>A participant's record within a round-robin (or one group of a group stage): matches played/won/lost and total games won/lost.</summary>
+public readonly record struct RoundRobinStanding(Guid ParticipantId, int Played, int Wins, int Losses, int GamesWon, int GamesLost);
 
 /// <summary>
 /// Pure round-robin ranking, the single source of truth for both the displayed standings and the
-/// Group Stage + Playoff seeding. Within a set of participants tied on the raw win-loss record it
-/// applies, in order: any played <see cref="BracketSegment.Tiebreaker"/> match record among them,
-/// then head-to-head (round-robin results among them), then game differential, and finally name
-/// (ordinal, case-insensitive) as a deterministic backstop - names are unique within a tournament,
-/// so the order is always total.
+/// Group Stage + Playoff seeding. The primary key is match wins, or - for a Best-of-2 group
+/// (<paramref name="byGamesWon"/>) - total games won. Within a set tied on that record it applies, in
+/// order: any played <see cref="BracketSegment.Tiebreaker"/> record among them, then head-to-head
+/// (match wins, or games, among them), then game differential, and finally name (ordinal,
+/// case-insensitive) as a deterministic backstop - names are unique within a tournament, so the order
+/// is always total.
 /// </summary>
 public static class RoundRobinStandings
 {
     /// <summary>
-    /// Ranks <paramref name="participants"/> by their record in <paramref name="matches"/>. The match
-    /// set may include both <see cref="BracketSegment.RoundRobin"/> and <see cref="BracketSegment.Tiebreaker"/>
-    /// matches for the scope (one group, or a whole round-robin field); they are separated by segment
-    /// here. <paramref name="roster"/> supplies the id-to-participant lookup (used for the name tiebreak).
+    /// Ranks <paramref name="participants"/> by their record in <paramref name="matches"/> (which may mix
+    /// <see cref="BracketSegment.RoundRobin"/> and <see cref="BracketSegment.Tiebreaker"/> matches for the
+    /// scope; they are separated by segment here). Pass <paramref name="byGamesWon"/> true to rank a
+    /// Best-of-2 group by total games won rather than match wins.
     /// </summary>
     public static List<RoundRobinStanding> Rank(
-        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, Participant> roster)
+        IEnumerable<Match> matches,
+        IReadOnlyCollection<Participant> participants,
+        IReadOnlyDictionary<Guid, Participant> roster,
+        bool byGamesWon = false)
     {
-        var (standingById, atoms) = Analyse(matches, participants, roster, tiers: AllTiers);
+        var (standingById, atoms) = Analyse(matches, participants, byGamesWon, tiers: AllTiers);
 
         var ordered = new List<RoundRobinStanding>(participants.Count);
         foreach (var atom in atoms)
@@ -42,31 +43,27 @@ public static class RoundRobinStandings
         return ordered;
     }
 
-    /// <summary>Every automatic criterion, best-first, applied only within a cohort already level on wins and losses.</summary>
+    /// <summary>Every automatic criterion, best-first, applied only within a cohort already level on the primary record.</summary>
     private const int AllTiers = 3;
 
     /// <summary>Only the played tie-breaker record - what <see cref="TiebreakerPolicy.AlwaysMatch"/> allows to separate a cohort without playing.</summary>
     private const int TiebreakerRecordOnly = 1;
 
     /// <summary>
-    /// The shared core: the win-loss record per participant, plus the record cohorts refined into
-    /// "atoms" - runs the automatic criteria cannot separate - in final standings order (bar the name
-    /// tiebreak). Both public entry points read the same pass rather than each deriving it again.
+    /// The shared core: the record per participant, plus the record cohorts refined into "atoms" - runs
+    /// the automatic criteria cannot separate - in final standings order (bar the name tiebreak). Both
+    /// public entry points read the same pass rather than each deriving it again.
     /// </summary>
     private static (Dictionary<Guid, RoundRobinStanding> StandingById, List<List<Guid>> Atoms) Analyse(
-        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, Participant> roster, int tiers)
+        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, bool byGamesWon, int tiers)
     {
         var (rr, tb) = SplitSegments(matches);
-        var (wins, losses) = WinLoss(rr);
-        var gameDiff = GameDifferential(rr, participants);
-
-        var standingById = participants.ToDictionary(
-            p => p.Id, p => new RoundRobinStanding(p.Id, wins.GetValueOrDefault(p.Id), losses.GetValueOrDefault(p.Id)));
+        var standingById = Aggregate(rr, participants);
 
         var atoms = new List<List<Guid>>();
-        foreach (var cohort in RecordCohorts(standingById.Values))
+        foreach (var cohort in RecordCohorts(standingById.Values, byGamesWon))
         {
-            atoms.AddRange(AutoAtoms(cohort, rr, tb, gameDiff, tiers));
+            atoms.AddRange(AutoAtoms(cohort, rr, tb, standingById, byGamesWon, tiers));
         }
 
         return (standingById, atoms);
@@ -88,13 +85,14 @@ public static class RoundRobinStandings
         IReadOnlyCollection<Participant> participants,
         IReadOnlyDictionary<Guid, Participant> roster,
         TiebreakerPolicy policy,
-        IReadOnlyCollection<int> boundaryCuts)
+        IReadOnlyCollection<int> boundaryCuts,
+        bool byGamesWon = false)
     {
         // AlwaysMatch deliberately ignores head-to-head/differential when deciding *whether* to play, so
         // only the played tie-breaker record may separate a cohort for it; ComputedThenMatch may use all
         // three. Either way, anything still lumped together needs (another) round.
         var tiers = policy == TiebreakerPolicy.AlwaysMatch ? TiebreakerRecordOnly : AllTiers;
-        var (_, atoms) = Analyse(matches, participants, roster, tiers);
+        var (_, atoms) = Analyse(matches, participants, byGamesWon, tiers);
 
         var position = Positions(atoms, roster);
         return atoms
@@ -134,59 +132,68 @@ public static class RoundRobinStandings
         return (rr, tb);
     }
 
-    private static (Dictionary<Guid, int> Wins, Dictionary<Guid, int> Losses) WinLoss(IEnumerable<Match> matches)
+    /// <summary>
+    /// Per-participant record over the decided matches: matches played, match wins/losses (a drawn
+    /// Best-of-2 counts as played but is neither), and total games won/lost from the recorded games.
+    /// </summary>
+    private static Dictionary<Guid, RoundRobinStanding> Aggregate(IEnumerable<Match> roundRobin, IReadOnlyCollection<Participant> participants)
     {
-        var wins = new Dictionary<Guid, int>();
-        var losses = new Dictionary<Guid, int>();
-        foreach (var match in matches)
-        {
-            if (match.WinnerId is not { } winnerId || match.LoserId is not { } loserId)
-            {
-                continue;
-            }
+        var played = participants.ToDictionary(p => p.Id, _ => 0);
+        var wins = participants.ToDictionary(p => p.Id, _ => 0);
+        var losses = participants.ToDictionary(p => p.Id, _ => 0);
+        var gamesWon = participants.ToDictionary(p => p.Id, _ => 0);
+        var gamesLost = participants.ToDictionary(p => p.Id, _ => 0);
 
-            wins[winnerId] = wins.GetValueOrDefault(winnerId) + 1;
-            losses[loserId] = losses.GetValueOrDefault(loserId) + 1;
-        }
-
-        return (wins, losses);
-    }
-
-    /// <summary>Game differential (games won minus games lost) over played games; forfeits with no recorded games contribute 0.</summary>
-    private static Dictionary<Guid, int> GameDifferential(IEnumerable<Match> roundRobin, IReadOnlyCollection<Participant> participants)
-    {
-        var diff = participants.ToDictionary(p => p.Id, _ => 0);
         foreach (var match in roundRobin)
         {
-            if (match.ParticipantAId is not { } a || match.ParticipantBId is not { } b)
+            if (!match.IsDecided || match.ParticipantAId is not { } a || match.ParticipantBId is not { } b
+                || !played.ContainsKey(a) || !played.ContainsKey(b))
             {
                 continue;
             }
 
-            var aGames = match.ScoreEntries.Count(e => e.ParticipantAWon);
-            var bGames = match.ScoreEntries.Count - aGames;
-            if (diff.ContainsKey(a))
-            {
-                diff[a] += aGames - bGames;
-            }
+            played[a]++;
+            played[b]++;
 
-            if (diff.ContainsKey(b))
+            var (aGames, bGames) = GamesEach(match);
+            gamesWon[a] += aGames;
+            gamesLost[a] += bGames;
+            gamesWon[b] += bGames;
+            gamesLost[b] += aGames;
+
+            if (match.WinnerId is { } winnerId && match.LoserId is { } loserId)
             {
-                diff[b] += bGames - aGames;
+                wins[winnerId]++;
+                losses[loserId]++;
             }
         }
 
-        return diff;
+        return participants.ToDictionary(
+            p => p.Id,
+            p => new RoundRobinStanding(p.Id, played[p.Id], wins[p.Id], losses[p.Id], gamesWon[p.Id], gamesLost[p.Id]));
     }
 
-    /// <summary>Groups standings into cohorts of an equal (wins, losses) record, ordered wins desc then losses asc.</summary>
-    private static List<List<Guid>> RecordCohorts(IEnumerable<RoundRobinStanding> standings) =>
-        standings
-            .GroupBy(s => (s.Wins, s.Losses))
-            .OrderByDescending(g => g.Key.Wins)
-            .ThenBy(g => g.Key.Losses)
+    /// <summary>Games won by each side of a decided match; a drawn Best-of-2 still splits its games (e.g. 1-1).</summary>
+    private static (int A, int B) GamesEach(Match match)
+    {
+        var aGames = match.ScoreEntries.Count(e => e.ParticipantAWon);
+        return (aGames, match.ScoreEntries.Count - aGames);
+    }
+
+    /// <summary>Groups standings into cohorts of an equal primary record - match wins, or games won for a Best-of-2 group - best-first, with fewer losses breaking equal-primary ties.</summary>
+    private static List<List<Guid>> RecordCohorts(IEnumerable<RoundRobinStanding> standings, bool byGamesWon)
+    {
+        var key = byGamesWon
+            ? (Func<RoundRobinStanding, (int Primary, int Secondary)>)(s => (s.GamesWon, s.GamesLost))
+            : s => (s.Wins, s.Losses);
+
+        return standings
+            .GroupBy(key)
+            .OrderByDescending(g => g.Key.Primary)
+            .ThenBy(g => g.Key.Secondary)
             .Select(g => g.Select(s => s.ParticipantId).ToList())
             .ToList();
+    }
 
     /// <summary>
     /// Splits a record-cohort into ordered "atoms" - maximal subsets that the automatic criteria
@@ -195,20 +202,21 @@ public static class RoundRobinStandings
     /// </summary>
     /// <param name="tiers">How many of the criteria may separate the cohort: 1 = the played tie-breaker record only, 3 = all of them.</param>
     private static List<List<Guid>> AutoAtoms(
-        List<Guid> members, List<Match> rr, List<Match> tb, IReadOnlyDictionary<Guid, int> gameDiff, int tiers)
+        List<Guid> members, List<Match> rr, List<Match> tb, IReadOnlyDictionary<Guid, RoundRobinStanding> standingById, bool byGamesWon, int tiers)
     {
         if (members.Count <= 1)
         {
             return new List<List<Guid>> { members };
         }
 
-        // Best-first: the played tie-breaker record, then head-to-head within the cohort, then game
-        // differential over the whole scope. The first that separates anyone wins; the rest recurse.
+        // Best-first: the played tie-breaker record (always decisive), then head-to-head within the
+        // cohort (match wins, or games for a Best-of-2 group), then overall game differential. The first
+        // that separates anyone wins; the rest recurse.
         var criteria = new Func<List<Guid>, IReadOnlyDictionary<Guid, int>>[]
         {
             cohort => WinsAmong(cohort, tb),
-            cohort => WinsAmong(cohort, rr),
-            cohort => cohort.ToDictionary(id => id, id => gameDiff.GetValueOrDefault(id)),
+            cohort => byGamesWon ? GamesAmong(cohort, rr) : WinsAmong(cohort, rr),
+            cohort => cohort.ToDictionary(id => id, id => standingById[id].GamesWon - standingById[id].GamesLost),
         };
 
         foreach (var score in criteria.Take(tiers))
@@ -216,7 +224,7 @@ public static class RoundRobinStandings
             var split = SplitByScore(members, score(members));
             if (split.Count > 1)
             {
-                return split.SelectMany(group => AutoAtoms(group, rr, tb, gameDiff, tiers)).ToList();
+                return split.SelectMany(group => AutoAtoms(group, rr, tb, standingById, byGamesWon, tiers)).ToList();
             }
         }
 
@@ -238,6 +246,24 @@ public static class RoundRobinStandings
         }
 
         return wins;
+    }
+
+    /// <summary>Games each member won counting only matches played between two members of the set (the games head-to-head for a Best-of-2 group).</summary>
+    private static Dictionary<Guid, int> GamesAmong(List<Guid> members, IEnumerable<Match> matches)
+    {
+        var set = members.ToHashSet();
+        var games = members.ToDictionary(id => id, _ => 0);
+        foreach (var match in matches)
+        {
+            if (match.ParticipantAId is { } a && match.ParticipantBId is { } b && set.Contains(a) && set.Contains(b))
+            {
+                var (aGames, bGames) = GamesEach(match);
+                games[a] += aGames;
+                games[b] += bGames;
+            }
+        }
+
+        return games;
     }
 
     /// <summary>Partitions members by a per-member score into groups ordered by score descending; a single group means "all equal".</summary>

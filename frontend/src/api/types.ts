@@ -1,8 +1,11 @@
 export type TournamentType = 'SingleElimination' | 'DoubleElimination' | 'RoundRobin' | 'GroupStagePlayoff';
-export type MatchFormat = 'Bo1' | 'Bo3' | 'Bo5' | 'Bo7';
+/** Bo2 is draw-capable (both games played, a 1-1 is a draw) and only used for a Best-of-2 group stage - never in the tournament's default-format picker. */
+export type MatchFormat = 'Bo1' | 'Bo2' | 'Bo3' | 'Bo5' | 'Bo7';
 export type TournamentStatus = 'Planned' | 'Running' | 'Finished';
 /** How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff. */
 export type TiebreakerPolicy = 'ComputedThenMatch' | 'AlwaysMatch';
+/** Group Stage + Playoff only: how the group matches are played and scored. */
+export type GroupStageFormat = 'Standard' | 'BestOfTwo';
 
 export interface TournamentSummary {
   id: string;
@@ -26,6 +29,8 @@ export interface Tournament {
   groupCount: number;
   /** Round Robin + Group Stage + Playoff: how standings ties are resolved. */
   tiebreakerPolicy: TiebreakerPolicy;
+  /** Group Stage + Playoff only: Standard, or Best-of-2 ranked by games won. */
+  groupStageFormat: GroupStageFormat;
   status: TournamentStatus;
   publicToken: string;
   createdAt: string;
@@ -92,6 +97,8 @@ export interface StandingRow {
   played: number;
   wins: number;
   losses: number;
+  /** Total games won - the primary ranking key for a Best-of-2 group. */
+  gamesWon: number;
 }
 
 /** Single/Double Elimination only: one rung of the final-placements leaderboard; more than one participant means a tie. */
@@ -149,6 +156,8 @@ export interface PublicTournament {
   defaultScoreType: ScoreType;
   groupCount: number;
   tiebreakerPolicy: TiebreakerPolicy;
+  /** Group Stage + Playoff only: Standard, or Best-of-2 ranked by games won. */
+  groupStageFormat: GroupStageFormat;
   status: TournamentStatus;
   participants: Participant[];
   bracket: Bracket | null;
@@ -188,6 +197,8 @@ export interface TournamentInput {
   defaultScoreType: ScoreType;
   groupCount: number;
   tiebreakerPolicy: TiebreakerPolicy;
+  /** Group Stage + Playoff only: Standard, or Best-of-2 ranked by games won. */
+  groupStageFormat: GroupStageFormat;
 }
 
 export const tournamentTypeLabels: Record<TournamentType, string> = {
@@ -199,6 +210,7 @@ export const tournamentTypeLabels: Record<TournamentType, string> = {
 
 export const matchFormatLabels: Record<MatchFormat, string> = {
   Bo1: 'Best of 1',
+  Bo2: 'Best of 2',
   Bo3: 'Best of 3',
   Bo5: 'Best of 5',
   Bo7: 'Best of 7',
@@ -207,6 +219,11 @@ export const matchFormatLabels: Record<MatchFormat, string> = {
 export const tiebreakerPolicyLabels: Record<TiebreakerPolicy, string> = {
   ComputedThenMatch: 'Head-to-head, then a decider match',
   AlwaysMatch: 'Always play a decider match',
+};
+
+export const groupStageFormatLabels: Record<GroupStageFormat, string> = {
+  Standard: 'Single decisive match',
+  BestOfTwo: 'Best of 2 (ranked by games won)',
 };
 
 export const tournamentStatusLabels: Record<TournamentStatus, string> = {
@@ -239,5 +256,10 @@ export function requiredWins(format: MatchFormat): number {
 
 /** The most games/sets a match of the given format can ever be decided in. */
 export function matchFormatGameCount(format: MatchFormat): number {
-  return { Bo1: 1, Bo3: 3, Bo5: 5, Bo7: 7 }[format];
+  return { Bo1: 1, Bo2: 2, Bo3: 3, Bo5: 5, Bo7: 7 }[format];
+}
+
+/** An even format (Best of 2) plays both games and may end level, so a match can be a draw. */
+export function allowsDraw(format: MatchFormat): boolean {
+  return matchFormatGameCount(format) % 2 === 0;
 }

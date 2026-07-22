@@ -41,7 +41,8 @@ public class TournamentService
             request.ThirdPlaceEnabled,
             _timeProvider.GetUtcNow(),
             request.GroupCount,
-            request.TiebreakerPolicy);
+            request.TiebreakerPolicy,
+            request.GroupStageFormat);
 
         await _repository.AddAsync(tournament, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -65,7 +66,8 @@ public class TournamentService
             request.DefaultScoreType,
             request.ThirdPlaceEnabled,
             request.GroupCount,
-            request.TiebreakerPolicy);
+            request.TiebreakerPolicy,
+            request.GroupStageFormat);
 
         await _repository.SaveChangesAsync(cancellationToken);
 

@@ -63,6 +63,7 @@ export function EditTournamentPage() {
                 defaultScoreType: tournament.defaultScoreType,
                 groupCount: tournament.groupCount || 2,
                 tiebreakerPolicy: tournament.tiebreakerPolicy,
+                groupStageFormat: tournament.groupStageFormat,
               }}
               onSubmit={(values) => {
                 setError(null);

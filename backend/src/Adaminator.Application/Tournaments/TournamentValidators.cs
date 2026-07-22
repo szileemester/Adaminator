@@ -19,6 +19,7 @@ public class CreateTournamentRequestValidator : AbstractValidator<CreateTourname
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
         RuleFor(x => x.DefaultScoreType).IsInEnum();
         RuleFor(x => x.TiebreakerPolicy).IsInEnum();
+        RuleFor(x => x.GroupStageFormat).IsInEnum();
 
         RuleFor(x => x.ThirdPlaceEnabled)
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
@@ -49,6 +50,7 @@ public class UpdateTournamentRequestValidator : AbstractValidator<UpdateTourname
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
         RuleFor(x => x.DefaultScoreType).IsInEnum();
         RuleFor(x => x.TiebreakerPolicy).IsInEnum();
+        RuleFor(x => x.GroupStageFormat).IsInEnum();
 
         RuleFor(x => x.ThirdPlaceEnabled)
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))

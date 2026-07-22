@@ -110,7 +110,11 @@ public class Match
         Status = built.Count > 0 ? MatchStatus.InProgress : MatchStatus.Pending;
     }
 
-    /// <summary>Persists the final detailed score and decides the match. Rejects a non-decisive score (AC-SCORE-003).</summary>
+    /// <summary>
+    /// Persists the final detailed score and decides the match. A decisive (odd) format rejects a
+    /// non-decisive score (AC-SCORE-003); a draw-capable format (Best-of-2) instead requires every
+    /// game to be played and may end level, leaving <see cref="WinnerId"/> null (a draw).
+    /// </summary>
     internal void Complete(
         MatchFormat matchFormat,
         ScoreType scoreType,
@@ -121,22 +125,34 @@ public class Match
         EnsureNotDecided();
         var built = BuildEntries(matchFormat, scoreType, entries);
 
-        var required = matchFormat.RequiredWins();
         var winsA = built.Count(e => e.ParticipantAWon);
         var winsB = built.Count - winsA;
 
-        Guid winnerId;
-        if (winsA >= required)
+        Guid? winnerId;
+        if (matchFormat.AllowsDraw())
         {
-            winnerId = ParticipantAId!.Value;
-        }
-        else if (winsB >= required)
-        {
-            winnerId = ParticipantBId!.Value;
+            if (built.Count != matchFormat.MaxGames())
+            {
+                throw new DomainException($"A {matchFormat} match must have all {matchFormat.MaxGames()} games played.");
+            }
+
+            winnerId = winsA > winsB ? ParticipantAId : winsB > winsA ? ParticipantBId : null;
         }
         else
         {
-            throw new DomainException("Neither participant has reached the required number of wins yet.");
+            var required = matchFormat.RequiredWins();
+            if (winsA >= required)
+            {
+                winnerId = ParticipantAId!.Value;
+            }
+            else if (winsB >= required)
+            {
+                winnerId = ParticipantBId!.Value;
+            }
+            else
+            {
+                throw new DomainException("Neither participant has reached the required number of wins yet.");
+            }
         }
 
         ApplyEntries(matchFormat, scoreType, built);

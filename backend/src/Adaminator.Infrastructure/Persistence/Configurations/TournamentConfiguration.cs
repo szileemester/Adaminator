@@ -54,6 +54,11 @@ public class TournamentConfiguration : IEntityTypeConfiguration<Tournament>
             .HasMaxLength(30)
             .IsRequired();
 
+        builder.Property(t => t.GroupStageFormat)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+
         builder.Property(t => t.PublicToken)
             .IsRequired()
             .HasMaxLength(64);

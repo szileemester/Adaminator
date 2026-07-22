@@ -197,7 +197,7 @@ internal static class BracketProjection
                 g,
                 GroupIntoRounds(groupMatches, PlainRoundTitle, roster, tournament),
                 // Standings rank over the group's round-robin AND tie-breaker matches, so they show the played order.
-                BuildStandings(groupMatches.Concat(groupTiebreakers).ToList(), participantsByGroup[g].ToList(), roster),
+                BuildStandings(groupMatches.Concat(groupTiebreakers).ToList(), participantsByGroup[g].ToList(), roster, tournament.RanksGroupsByGamesWon),
                 GroupIntoRounds(groupTiebreakers, PlainRoundTitle, roster, tournament)));
         }
 
@@ -255,12 +255,12 @@ internal static class BracketProjection
     /// then maps to display rows with a 1-based rank.
     /// </summary>
     private static IReadOnlyList<StandingRowDto> BuildStandings(
-        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, Participant> roster) =>
-        RoundRobinStandings.Rank(matches, participants, roster)
+        IEnumerable<Match> matches, IReadOnlyCollection<Participant> participants, IReadOnlyDictionary<Guid, Participant> roster, bool byGamesWon = false) =>
+        RoundRobinStandings.Rank(matches, participants, roster, byGamesWon)
             .Select((row, i) =>
             {
                 var participant = roster[row.ParticipantId];
-                return new StandingRowDto(i + 1, row.ParticipantId, participant.Name, participant.Emoji, row.Played, row.Wins, row.Losses);
+                return new StandingRowDto(i + 1, row.ParticipantId, participant.Name, participant.Emoji, row.Played, row.Wins, row.Losses, row.GamesWon);
             })
             .ToList();
 

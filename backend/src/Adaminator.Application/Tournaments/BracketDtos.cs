@@ -23,8 +23,8 @@ public record BracketMatchDto(
 
 public record BracketRoundDto(int Round, string Title, IReadOnlyList<BracketMatchDto> Matches);
 
-/// <summary>Round Robin only: a participant's ranked won-loss record, sorted wins desc, losses asc, name asc.</summary>
-public record StandingRowDto(int Rank, Guid ParticipantId, string Name, string? Emoji, int Played, int Wins, int Losses);
+/// <summary>A participant's ranked group/round-robin record. <c>GamesWon</c> is the primary key for a Best-of-2 group; otherwise match wins are.</summary>
+public record StandingRowDto(int Rank, Guid ParticipantId, string Name, string? Emoji, int Played, int Wins, int Losses, int GamesWon);
 
 /// <summary>
 /// Single/Double Elimination only: one rung of the final-placements leaderboard - "Champion",

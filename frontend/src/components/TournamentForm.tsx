@@ -11,19 +11,22 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
-import type { MatchFormat, ScoreType, TiebreakerPolicy, TournamentInput, TournamentType } from '../api/types';
-import { matchFormatLabels, scoreTypeLabels, tiebreakerPolicyLabels, tournamentTypeLabels } from '../api/types';
+import type { GroupStageFormat, MatchFormat, ScoreType, TiebreakerPolicy, TournamentInput, TournamentType } from '../api/types';
+import { groupStageFormatLabels, matchFormatLabels, scoreTypeLabels, tiebreakerPolicyLabels, tournamentTypeLabels } from '../api/types';
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(200, 'Name is too long'),
   date: z.string().min(1, 'Date is required'),
   notes: z.string().max(2000, 'Notes are too long').optional(),
   type: z.enum(['SingleElimination', 'DoubleElimination', 'RoundRobin', 'GroupStagePlayoff']),
-  defaultMatchFormat: z.enum(['Bo1', 'Bo3', 'Bo5', 'Bo7']),
+  // Bo2 is accepted by the type but never offered in `matchFormats` below: the default format drives
+  // the decisive playoff, so the dropdown only lists the odd, always-decisive formats.
+  defaultMatchFormat: z.enum(['Bo1', 'Bo2', 'Bo3', 'Bo5', 'Bo7']),
   thirdPlaceEnabled: z.boolean(),
   defaultScoreType: z.enum(['WinnerOnly', 'Games', 'Points', 'Sets']),
   groupCount: z.number().int('Enter a whole number').min(2, 'At least 2 groups').max(16, 'At most 16 groups'),
   tiebreakerPolicy: z.enum(['ComputedThenMatch', 'AlwaysMatch']),
+  groupStageFormat: z.enum(['Standard', 'BestOfTwo']),
 });
 
 export type TournamentFormValues = z.infer<typeof schema>;
@@ -34,6 +37,7 @@ const matchFormats: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
 const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination', 'RoundRobin', 'GroupStagePlayoff'];
 const scoreTypes: ScoreType[] = ['Games', 'Sets', 'Points', 'WinnerOnly'];
 const tiebreakerPolicies: TiebreakerPolicy[] = ['ComputedThenMatch', 'AlwaysMatch'];
+const groupStageFormats: GroupStageFormat[] = ['Standard', 'BestOfTwo'];
 
 interface TournamentFormProps {
   initialValues?: Partial<TournamentFormValues>;
@@ -69,6 +73,7 @@ export function TournamentForm({
       defaultScoreType: 'Games',
       groupCount: 2,
       tiebreakerPolicy: 'ComputedThenMatch',
+      groupStageFormat: 'Standard',
       ...initialValues,
     },
   });
@@ -107,6 +112,7 @@ export function TournamentForm({
       defaultScoreType: values.defaultMatchFormat !== 'Bo1' && values.defaultScoreType === 'WinnerOnly' ? 'Games' : values.defaultScoreType,
       groupCount: values.type === 'GroupStagePlayoff' ? values.groupCount : 0,
       tiebreakerPolicy: values.tiebreakerPolicy,
+      groupStageFormat: values.type === 'GroupStagePlayoff' ? values.groupStageFormat : 'Standard',
     });
   });
 
@@ -183,6 +189,27 @@ export function TournamentForm({
               errors.groupCount?.message ??
               'Participants are drawn randomly into this many groups; sizes may differ by one. The largest power of two that fits (4/8/16/32) reaches the playoff - anyone below that is knocked out at the group stage.'
             }
+          />
+        )}
+
+        {isGroupStagePlayoff && (
+          <Controller
+            name="groupStageFormat"
+            control={control}
+            render={({ field }) => (
+              <TextField
+                select
+                label="Group matches"
+                {...field}
+                helperText="Best of 2 plays two games per pair (a 1-1 is a draw) and ranks groups by total games won. The playoff stays decisive."
+              >
+                {groupStageFormats.map((format) => (
+                  <MenuItem key={format} value={format}>
+                    {groupStageFormatLabels[format]}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
           />
         )}
 
