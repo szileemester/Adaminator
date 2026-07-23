@@ -1,11 +1,9 @@
 export type TournamentType = 'SingleElimination' | 'DoubleElimination' | 'RoundRobin' | 'GroupStagePlayoff';
-/** Bo2 is draw-capable (both games played, a 1-1 is a draw) and only used for a Best-of-2 group stage - never in the tournament's default-format picker. */
+/** Bo2 is draw-capable (both games played, a 1-1 is a draw) and only offered for the Group Stage match format - every other format picker (Upper/Lower/Grand Final/Match format) is decisive-only. */
 export type MatchFormat = 'Bo1' | 'Bo2' | 'Bo3' | 'Bo5' | 'Bo7';
 export type TournamentStatus = 'Planned' | 'Running' | 'Finished';
 /** How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff. */
 export type TiebreakerPolicy = 'ComputedThenMatch' | 'AlwaysMatch';
-/** Group Stage + Playoff only: how the group matches are played and scored. */
-export type GroupStageFormat = 'Standard' | 'BestOfTwo';
 
 export interface TournamentSummary {
   id: string;
@@ -22,6 +20,7 @@ export interface Tournament {
   date: string;
   notes: string | null;
   type: TournamentType;
+  /** Single Elimination + Round Robin only: the tournament's one match format. Equal to one of the segment formats below for every other type (unused). */
   defaultMatchFormat: MatchFormat;
   thirdPlaceEnabled: boolean;
   defaultScoreType: ScoreType;
@@ -29,8 +28,14 @@ export interface Tournament {
   groupCount: number;
   /** Round Robin + Group Stage + Playoff: how standings ties are resolved. */
   tiebreakerPolicy: TiebreakerPolicy;
-  /** Group Stage + Playoff only: Standard, or Best-of-2 ranked by games won. */
-  groupStageFormat: GroupStageFormat;
+  /** Group Stage + Playoff only: how group matches are played and scored - any format, including Bo2 (draws, ranked by games won). */
+  groupStageMatchFormat: MatchFormat;
+  /** Double Elimination + Group Stage + Playoff only: the Winner Bracket's match format. */
+  upperBracketFormat: MatchFormat;
+  /** Double Elimination + Group Stage + Playoff only: the Loser Bracket's match format. */
+  lowerBracketFormat: MatchFormat;
+  /** Double Elimination + Group Stage + Playoff only: the Grand Final's match format. */
+  grandFinalFormat: MatchFormat;
   status: TournamentStatus;
   publicToken: string;
   createdAt: string;
@@ -156,8 +161,14 @@ export interface PublicTournament {
   defaultScoreType: ScoreType;
   groupCount: number;
   tiebreakerPolicy: TiebreakerPolicy;
-  /** Group Stage + Playoff only: Standard, or Best-of-2 ranked by games won. */
-  groupStageFormat: GroupStageFormat;
+  /** Group Stage + Playoff only: how group matches are played and scored - any format, including Bo2 (draws, ranked by games won). */
+  groupStageMatchFormat: MatchFormat;
+  /** Double Elimination + Group Stage + Playoff only: the Winner Bracket's match format. */
+  upperBracketFormat: MatchFormat;
+  /** Double Elimination + Group Stage + Playoff only: the Loser Bracket's match format. */
+  lowerBracketFormat: MatchFormat;
+  /** Double Elimination + Group Stage + Playoff only: the Grand Final's match format. */
+  grandFinalFormat: MatchFormat;
   status: TournamentStatus;
   participants: Participant[];
   bracket: Bracket | null;
@@ -197,8 +208,10 @@ export interface TournamentInput {
   defaultScoreType: ScoreType;
   groupCount: number;
   tiebreakerPolicy: TiebreakerPolicy;
-  /** Group Stage + Playoff only: Standard, or Best-of-2 ranked by games won. */
-  groupStageFormat: GroupStageFormat;
+  groupStageMatchFormat: MatchFormat;
+  upperBracketFormat: MatchFormat;
+  lowerBracketFormat: MatchFormat;
+  grandFinalFormat: MatchFormat;
 }
 
 export const tournamentTypeLabels: Record<TournamentType, string> = {
@@ -219,11 +232,6 @@ export const matchFormatLabels: Record<MatchFormat, string> = {
 export const tiebreakerPolicyLabels: Record<TiebreakerPolicy, string> = {
   ComputedThenMatch: 'Head-to-head, then a decider match',
   AlwaysMatch: 'Always play a decider match',
-};
-
-export const groupStageFormatLabels: Record<GroupStageFormat, string> = {
-  Standard: 'Single decisive match',
-  BestOfTwo: 'Best of 2 (ranked by games won)',
 };
 
 export const tournamentStatusLabels: Record<TournamentStatus, string> = {

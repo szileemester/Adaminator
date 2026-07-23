@@ -19,7 +19,20 @@ public class CreateTournamentRequestValidator : AbstractValidator<CreateTourname
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
         RuleFor(x => x.DefaultScoreType).IsInEnum();
         RuleFor(x => x.TiebreakerPolicy).IsInEnum();
-        RuleFor(x => x.GroupStageFormat).IsInEnum();
+        RuleFor(x => x.GroupStageMatchFormat).IsInEnum();
+        RuleFor(x => x.UpperBracketFormat).IsInEnum();
+        RuleFor(x => x.LowerBracketFormat).IsInEnum();
+        RuleFor(x => x.GrandFinalFormat).IsInEnum();
+
+        // Only the Group Stage format may allow draws (Best of 2) - every bracket match needs a winner.
+        RuleFor(x => x.DefaultMatchFormat).Must(f => !f.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
+        RuleFor(x => x.UpperBracketFormat).Must(f => f is null || !f.Value.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
+        RuleFor(x => x.LowerBracketFormat).Must(f => f is null || !f.Value.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
+        RuleFor(x => x.GrandFinalFormat).Must(f => f is null || !f.Value.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
 
         RuleFor(x => x.ThirdPlaceEnabled)
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
@@ -50,7 +63,20 @@ public class UpdateTournamentRequestValidator : AbstractValidator<UpdateTourname
         RuleFor(x => x.DefaultMatchFormat).IsInEnum();
         RuleFor(x => x.DefaultScoreType).IsInEnum();
         RuleFor(x => x.TiebreakerPolicy).IsInEnum();
-        RuleFor(x => x.GroupStageFormat).IsInEnum();
+        RuleFor(x => x.GroupStageMatchFormat).IsInEnum();
+        RuleFor(x => x.UpperBracketFormat).IsInEnum();
+        RuleFor(x => x.LowerBracketFormat).IsInEnum();
+        RuleFor(x => x.GrandFinalFormat).IsInEnum();
+
+        // Only the Group Stage format may allow draws (Best of 2) - every bracket match needs a winner.
+        RuleFor(x => x.DefaultMatchFormat).Must(f => !f.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
+        RuleFor(x => x.UpperBracketFormat).Must(f => f is null || !f.Value.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
+        RuleFor(x => x.LowerBracketFormat).Must(f => f is null || !f.Value.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
+        RuleFor(x => x.GrandFinalFormat).Must(f => f is null || !f.Value.AllowsDraw())
+            .WithMessage("Best of 2 is only valid for the group stage.");
 
         RuleFor(x => x.ThirdPlaceEnabled)
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))

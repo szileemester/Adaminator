@@ -16,7 +16,7 @@ public class BestOfTwoGroupTests
     {
         var t = Tournament.Create(
             "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo3, ScoreType.Games, false, CreatedAt,
-            groupCount: groupCount, tiebreakerPolicy: policy, groupStageFormat: GroupStageFormat.BestOfTwo);
+            groupCount: groupCount, tiebreakerPolicy: policy, groupStageMatchFormat: MatchFormat.Bo2);
         for (var i = 1; i <= participants; i++)
         {
             t.AddParticipant($"P{i}");
@@ -136,17 +136,17 @@ public class BestOfTwoGroupTests
         var t = Tournament.Create(
             "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.WinnerOnly, false, CreatedAt, groupCount: 2);
 
-        t.GroupStageFormat.Should().Be(GroupStageFormat.Standard);
+        t.GroupStageMatchFormat.Should().Be(MatchFormat.Bo1);
         t.RanksGroupsByGamesWon.Should().BeFalse();
     }
 
     [Fact]
-    public void A_non_group_stage_type_coerces_the_format_to_standard()
+    public void A_non_group_stage_type_coerces_the_format_to_the_tournaments_default()
     {
         var t = Tournament.Create(
-            "League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, ScoreType.WinnerOnly, false, CreatedAt,
-            groupStageFormat: GroupStageFormat.BestOfTwo);
+            "League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo3, ScoreType.Games, false, CreatedAt,
+            groupStageMatchFormat: MatchFormat.Bo2);
 
-        t.GroupStageFormat.Should().Be(GroupStageFormat.Standard);
+        t.GroupStageMatchFormat.Should().Be(MatchFormat.Bo3);
     }
 }

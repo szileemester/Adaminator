@@ -205,7 +205,7 @@ public class DoubleEliminationMatchResultTests
     }
 
     [Fact]
-    public void Undoing_the_grand_final_flips_the_tournament_back_to_running()
+    public void A_finished_tournaments_grand_final_is_locked_and_cannot_be_undone()
     {
         var tournament = StartedFourPlayer();
         var wb1 = Winner(tournament, 1, 0);
@@ -224,8 +224,11 @@ public class DoubleEliminationMatchResultTests
         tournament.Finish();
         tournament.Status.Should().Be(TournamentStatus.Finished);
 
-        tournament.UndoMatch(grandFinal.Id);
+        tournament.CanUndo(grandFinal.Id).Should().BeFalse();
 
-        tournament.Status.Should().Be(TournamentStatus.Running);
+        var act = () => tournament.UndoMatch(grandFinal.Id);
+
+        act.Should().Throw<DomainException>().WithMessage("*locked*");
+        tournament.Status.Should().Be(TournamentStatus.Finished);
     }
 }

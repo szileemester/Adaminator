@@ -60,13 +60,12 @@ public static class GroupStagePlayoffBracket
     /// <summary>
     /// Builds the group-stage matches: one round robin per group, each match tagged with its group index.
     /// A Best-of-2 group plays draw-capable <see cref="MatchFormat.Bo2"/> matches (scored as games,
-    /// since Winner Only is Bo1-only); the playoff still reads the tournament's decisive default format.
+    /// since Winner Only is Bo1-only); the playoff reads its own, always-decisive segment formats.
     /// </summary>
     public static List<Match> BuildGroupStage(Tournament tournament)
     {
-        var bestOfTwo = tournament.GroupStageFormat == GroupStageFormat.BestOfTwo;
-        var format = bestOfTwo ? MatchFormat.Bo2 : tournament.DefaultMatchFormat;
-        var scoreType = bestOfTwo && tournament.DefaultScoreType == ScoreType.WinnerOnly
+        var format = tournament.GroupStageMatchFormat;
+        var scoreType = format.AllowsDraw() && tournament.DefaultScoreType == ScoreType.WinnerOnly
             ? ScoreType.Games
             : tournament.DefaultScoreType;
 
@@ -183,8 +182,10 @@ public static class GroupStagePlayoffBracket
     {
         var capacity = upperSeeds.Count + lowerSeeds.Count;
         var topology = DoubleEliminationBracket.GenerateTopology(capacity);
-        var format = tournament.DefaultMatchFormat;
         var scoreType = tournament.DefaultScoreType;
+        var winnerFormat = tournament.PlayoffFormatFor(BracketSegment.Winner);
+        var loserFormat = tournament.PlayoffFormatFor(BracketSegment.Loser);
+        var grandFinalFormat = tournament.PlayoffFormatFor(BracketSegment.GrandFinal);
 
         var byRef = new Dictionary<BracketMatchRef, Match>();
         foreach (var topologyMatch in topology)
@@ -211,7 +212,14 @@ public static class GroupStagePlayoffBracket
                 b = lowerSeeds[2 * reference.IndexInRound + 1];
             }
 
-            byRef[reference] = Match.Create(tournament.Id, reference.Segment, reference.Round, reference.IndexInRound, a, b, format, scoreType);
+            var format = reference.Segment switch
+            {
+                BracketSegment.Winner => winnerFormat,
+                BracketSegment.Loser => loserFormat,
+                _ => grandFinalFormat,
+            };
+            byRef[reference] = Match.Create(
+                tournament.Id, reference.Segment, reference.Round, reference.IndexInRound, a, b, format, scoreType);
         }
 
         // Every target is a real match here (no bye cascade to hop over), so no route resolver is needed.

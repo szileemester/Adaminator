@@ -17,14 +17,13 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material';
-import type { BracketMatch, MatchFormat, ScoreType } from '../api/types';
+import type { BracketMatch, ScoreType } from '../api/types';
 import { allowsDraw, formatParticipantName, matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
 import { completeMatch, forfeitMatch, saveMatchResult, undoMatch } from '../api/matches';
 import type { ScoreEntryInput } from '../api/matches';
 import { extractErrorMessage } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
 
-const MATCH_FORMATS: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
 const SCORE_TYPES: ScoreType[] = ['Games', 'Sets', 'Points', 'WinnerOnly'];
 
 /** One game slot's in-progress state - `participantAWon: null` means "not yet decided", distinct from the boolean the API wire format requires once a game is actually played. */
@@ -106,14 +105,15 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   const queryClient = useQueryClient();
   const isDecided = match.status === 'Completed' || match.status === 'Forfeit';
 
-  const [matchFormat, setMatchFormat] = useState<MatchFormat>(match.matchFormat);
+  // Fixed for the lifetime of the dialog: the format is set once when the bracket is built (by the
+  // tournament's Upper/Lower/Grand Final/Group Stage settings), never editable at result-entry time.
+  const matchFormat = match.matchFormat;
   // Null until the admin picks one explicitly - a fresh match has no scoreType on the wire either
   // (Match.ScoreType is only set once a result is first saved), so there is no sensible default to
   // silently preselect here.
   const [scoreType, setScoreType] = useState<ScoreType | null>(match.scoreType);
   // Only the played prefix is stored - a slot never exists in state until the admin has touched it,
-  // so there is no fixed-length array to keep in sync with the match format (see the format Select's
-  // onChange, which truncates this directly instead of a resize effect).
+  // so there is no fixed-length array to keep in sync with the (now fixed) match format.
   const [entries, setEntries] = useState<GameSlot[]>(() =>
     match.entries.map((e) => ({ scoreA: e.scoreA, scoreB: e.scoreB, participantAWon: e.participantAWon })),
   );
@@ -244,39 +244,10 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
             </Stack>
           ) : (
             <>
-              <Stack direction="row" spacing={2}>
-                <FormControl fullWidth size="small">
-                  <InputLabel id="match-format-label">Match format</InputLabel>
-                  <Select
-                    labelId="match-format-label"
-                    label="Match format"
-                    value={matchFormat}
-                    onChange={(e) => {
-                      const format = e.target.value as MatchFormat;
-                      setMatchFormat(format);
-                      // A shrinking format (e.g. Bo5 -> Bo3) can drop games the admin already entered
-                      // beyond the new count; a growing one needs no action, since slice() is a no-op
-                      // when the array is already shorter than the new maxGames.
-                      setEntries((prev) => prev.slice(0, matchFormatGameCount(format)));
-                      // Winner Only is only valid for Bo1 (enforced below by disabling that MenuItem,
-                      // and server-side by Match.BuildEntries) - leaving it selected after moving to a
-                      // longer format would let the admin keep entering results under a combination
-                      // that only fails once they hit Save. Safe to clear here: every other score type
-                      // shares the same "participantAWon set" definition of a played game, so already
-                      // recorded results stay counted as played once a new type is chosen.
-                      if (format !== 'Bo1' && scoreType === 'WinnerOnly') {
-                        setScoreType(null);
-                      }
-                      setDirty(true);
-                    }}
-                  >
-                    {MATCH_FORMATS.map((format) => (
-                      <MenuItem key={format} value={format}>
-                        {matchFormatLabels[format]}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+              <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+                <Typography variant="body2" color="text.secondary">
+                  Format: {matchFormatLabels[matchFormat]}
+                </Typography>
                 <FormControl fullWidth size="small">
                   <InputLabel id="score-type-label" shrink>
                     Score type

@@ -40,11 +40,33 @@ public class Tournament
     /// <summary>How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff.</summary>
     public TiebreakerPolicy TiebreakerPolicy { get; private set; }
 
-    /// <summary>Group Stage + Playoff only: how the group matches are played and scored (decisive, or Best-of-2 ranked by games won). Standard for every other type.</summary>
-    public GroupStageFormat GroupStageFormat { get; private set; }
+    /// <summary>
+    /// Group Stage + Playoff only: how the group matches are played and scored - any format including
+    /// the draw-capable <see cref="MatchFormat.Bo2"/> (ranked by games won). Equal to
+    /// <see cref="DefaultMatchFormat"/> for every other type.
+    /// </summary>
+    public MatchFormat GroupStageMatchFormat { get; private set; }
 
-    /// <summary>Whether group standings rank by total games won (Best-of-2 group stage) rather than match wins.</summary>
-    public bool RanksGroupsByGamesWon => GroupStageFormat == GroupStageFormat.BestOfTwo;
+    /// <summary>Double Elimination and Group Stage + Playoff only: the Winner Bracket's match format. Equal to <see cref="DefaultMatchFormat"/> for every other type.</summary>
+    public MatchFormat UpperBracketFormat { get; private set; }
+
+    /// <summary>Double Elimination and Group Stage + Playoff only: the Loser Bracket's match format. Equal to <see cref="DefaultMatchFormat"/> for every other type.</summary>
+    public MatchFormat LowerBracketFormat { get; private set; }
+
+    /// <summary>Double Elimination and Group Stage + Playoff only: the Grand Final's match format. Equal to <see cref="DefaultMatchFormat"/> for every other type.</summary>
+    public MatchFormat GrandFinalFormat { get; private set; }
+
+    /// <summary>Whether group standings rank by total games won (a Best-of-2 group stage) rather than match wins.</summary>
+    public bool RanksGroupsByGamesWon => GroupStageMatchFormat == MatchFormat.Bo2;
+
+    /// <summary>The match format for a playoff segment - shared by <see cref="Brackets.DoubleEliminationBracket"/> and <see cref="Brackets.GroupStagePlayoffBracket"/>.</summary>
+    internal MatchFormat PlayoffFormatFor(BracketSegment segment) => segment switch
+    {
+        BracketSegment.Winner => UpperBracketFormat,
+        BracketSegment.Loser => LowerBracketFormat,
+        BracketSegment.GrandFinal => GrandFinalFormat,
+        _ => DefaultMatchFormat,
+    };
 
     public TournamentStatus Status { get; private set; }
 
@@ -73,7 +95,10 @@ public class Tournament
         DateTimeOffset createdAt,
         int groupCount = 0,
         TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
-        GroupStageFormat groupStageFormat = GroupStageFormat.Standard)
+        MatchFormat? groupStageMatchFormat = null,
+        MatchFormat? upperBracketFormat = null,
+        MatchFormat? lowerBracketFormat = null,
+        MatchFormat? grandFinalFormat = null)
     {
         var tournament = new Tournament
         {
@@ -83,7 +108,9 @@ public class Tournament
             CreatedAt = createdAt
         };
 
-        tournament.SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy, groupStageFormat);
+        tournament.SetDetails(
+            name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy,
+            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat);
         return tournament;
     }
 
@@ -98,10 +125,15 @@ public class Tournament
         bool thirdPlaceEnabled,
         int groupCount = 0,
         TiebreakerPolicy tiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
-        GroupStageFormat groupStageFormat = GroupStageFormat.Standard)
+        MatchFormat? groupStageMatchFormat = null,
+        MatchFormat? upperBracketFormat = null,
+        MatchFormat? lowerBracketFormat = null,
+        MatchFormat? grandFinalFormat = null)
     {
         EnsurePlanned("edited");
-        SetDetails(name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy, groupStageFormat);
+        SetDetails(
+            name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy,
+            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat);
     }
 
     // ---- Participant management (Planned only) ----
@@ -496,11 +528,17 @@ public class Tournament
             throw new DomainException("There are no ties that require a tie-breaker.");
         }
 
+        // Snapshot before the loop: cohorts sharing a group in this same wave must all start from the
+        // same offset. Reading live _matches instead would make each cohort see its siblings' matches
+        // - added earlier in this same loop - as a "previous wave" and number itself one round later,
+        // even though they are independent ties resolved simultaneously.
+        var existingTiebreakers = _matches.Where(m => m.Segment == BracketSegment.Tiebreaker).ToList();
+
         foreach (var (groupIndex, members) in cohorts)
         {
             // A previous wave may already occupy rounds 1..n for this scope (a tie-breaker round can
             // itself end in a cycle), so continue numbering after it rather than colliding with it.
-            var played = _matches.Where(m => m.Segment == BracketSegment.Tiebreaker && m.GroupIndex == groupIndex).ToList();
+            var played = existingTiebreakers.Where(m => m.GroupIndex == groupIndex).ToList();
             var roundOffset = played.Count == 0 ? 0 : played.Max(m => m.Round);
 
             _matches.AddRange(RoundRobinBracket.Schedule(
@@ -636,7 +674,10 @@ public class Tournament
                 return null;
             }
 
-            var finalRound = DoubleEliminationBracket.LoserRoundCount(DoubleEliminationBracket.ComputeBracketSize(_participants.Count));
+            var capacity = Type == TournamentType.GroupStagePlayoff
+                ? GroupStagePlayoffBracket.PlayoffCapacity(_participants.Count)
+                : DoubleEliminationBracket.ComputeBracketSize(_participants.Count);
+            var finalRound = DoubleEliminationBracket.LoserRoundCount(capacity);
             var loserFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Loser && m.Round == finalRound);
             if (loserFinal?.WinnerId is not { } winnerId)
             {
@@ -650,9 +691,15 @@ public class Tournament
     /// <summary>
     /// True if <paramref name="matchId"/> is currently eligible for <see cref="UndoMatch"/> (BR-022):
     /// it is the tournament's most recently decided match and nothing it fed into has started yet.
+    /// A finished tournament's result is locked - not even its deciding match can be undone.
     /// </summary>
     public bool CanUndo(Guid matchId)
     {
+        if (Status == TournamentStatus.Finished)
+        {
+            return false;
+        }
+
         var match = _matches.FirstOrDefault(m => m.Id == matchId);
         if (match is null || !IsLatestDecided(match))
         {
@@ -681,6 +728,11 @@ public class Tournament
     /// </summary>
     public void UndoMatch(Guid matchId)
     {
+        if (Status == TournamentStatus.Finished)
+        {
+            throw new DomainException("A finished tournament's result is locked and cannot be undone.");
+        }
+
         var match = FindMatch(matchId);
         if (match.Status is not (MatchStatus.Completed or MatchStatus.Forfeit))
         {
@@ -722,11 +774,6 @@ public class Tournament
                 nextWinnerMatch?.ClearSlot(nextWinnerSlotA, winnerId);
                 thirdPlaceMatch?.ClearSlot(SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(match.IndexInRound), loserId);
             }
-        }
-
-        if (Status == TournamentStatus.Finished)
-        {
-            Status = TournamentStatus.Running;
         }
 
         match.Undo();
@@ -895,7 +942,10 @@ public class Tournament
         bool thirdPlaceEnabled,
         int groupCount,
         TiebreakerPolicy tiebreakerPolicy,
-        GroupStageFormat groupStageFormat)
+        MatchFormat? groupStageMatchFormat,
+        MatchFormat? upperBracketFormat,
+        MatchFormat? lowerBracketFormat,
+        MatchFormat? grandFinalFormat)
     {
         name = (name ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(name))
@@ -919,7 +969,28 @@ public class Tournament
             throw new DomainException("Third place match is available only for Single Elimination tournaments.");
         }
 
-        if (defaultScoreType == ScoreType.WinnerOnly && defaultMatchFormat != MatchFormat.Bo1)
+        // Every per-segment format falls back to the tournament's single default when not given
+        // explicitly, and collapses back to it entirely for a type that has no such segment - so an
+        // existing Double Elimination or Group Stage + Playoff tournament (or a caller that only ever
+        // set one format) behaves exactly as it did with a single uniform format.
+        var usesBracketFormats = type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff;
+        var resolvedGroupStageFormat = type == TournamentType.GroupStagePlayoff ? groupStageMatchFormat ?? defaultMatchFormat : defaultMatchFormat;
+        var resolvedUpperFormat = usesBracketFormats ? upperBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
+        var resolvedLowerFormat = usesBracketFormats ? lowerBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
+        var resolvedGrandFinalFormat = usesBracketFormats ? grandFinalFormat ?? defaultMatchFormat : defaultMatchFormat;
+
+        // Only the Group Stage format may allow draws (Best of 2) - every bracket match needs a winner.
+        if (defaultMatchFormat.AllowsDraw() || resolvedUpperFormat.AllowsDraw()
+            || resolvedLowerFormat.AllowsDraw() || resolvedGrandFinalFormat.AllowsDraw())
+        {
+            throw new DomainException("Only the Group Stage format may allow draws (Best of 2).");
+        }
+
+        // The Group Stage format is exempt: its own draw-capable Bo2 already carries a scoreType
+        // exception at bracket-build time (BuildGroupStage), so it is not held to this rule here.
+        if (defaultScoreType == ScoreType.WinnerOnly
+            && (defaultMatchFormat != MatchFormat.Bo1 || resolvedUpperFormat != MatchFormat.Bo1
+                || resolvedLowerFormat != MatchFormat.Bo1 || resolvedGrandFinalFormat != MatchFormat.Bo1))
         {
             throw new DomainException("Winner Only scoring is valid only for BO1 matches.");
         }
@@ -938,7 +1009,10 @@ public class Tournament
         ThirdPlaceEnabled = type == TournamentType.SingleElimination && thirdPlaceEnabled;
         GroupCount = type == TournamentType.GroupStagePlayoff ? groupCount : 0;
         TiebreakerPolicy = tiebreakerPolicy;
-        GroupStageFormat = type == TournamentType.GroupStagePlayoff ? groupStageFormat : GroupStageFormat.Standard;
+        GroupStageMatchFormat = resolvedGroupStageFormat;
+        UpperBracketFormat = resolvedUpperFormat;
+        LowerBracketFormat = resolvedLowerFormat;
+        GrandFinalFormat = resolvedGrandFinalFormat;
     }
 
     private void EnsurePlanned(string action)

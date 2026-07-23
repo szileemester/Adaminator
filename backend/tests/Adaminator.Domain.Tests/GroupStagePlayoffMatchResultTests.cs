@@ -223,6 +223,32 @@ public class GroupStagePlayoffMatchResultTests
         tournament.Status.Should().Be(TournamentStatus.Finished);
     }
 
+    // ---- Podium ----
+
+    [Fact]
+    public void ThirdPlaceParticipantId_resolves_when_the_roster_is_not_an_exact_playoff_capacity()
+    {
+        // 10 participants -> playoff capacity 8 (two are eliminated at the group stage), so the
+        // playoff's own bracket size differs from the tournament's total roster size. This used to make
+        // ThirdPlaceParticipantId look for the Loser Bracket Final at a round computed from the roster
+        // size (16 slots) instead of the playoff's actual capacity (8 slots), so it never found the
+        // match and always returned null.
+        var tournament = StartedGroupStage(10, 2);
+        DecideAllGroupMatches(tournament);
+        tournament.StartPlayoffs();
+        PlayOutPlayoff(tournament);
+
+        var loserBracketFinal = tournament.Matches
+            .Where(m => m.Segment == BracketSegment.Loser)
+            .OrderByDescending(m => m.Round)
+            .First();
+        var expectedThird = loserBracketFinal.WinnerId == loserBracketFinal.ParticipantAId
+            ? loserBracketFinal.ParticipantBId
+            : loserBracketFinal.ParticipantAId;
+
+        tournament.ThirdPlaceParticipantId.Should().Be(expectedThird);
+    }
+
     // ---- Per-stage undo ----
 
     [Fact]

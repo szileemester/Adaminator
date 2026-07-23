@@ -3,9 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Box, Card, CardContent, CircularProgress, Stack, Typography } from '@mui/material';
 import { getTournament, updateTournament } from '../api/tournaments';
-import type { TournamentInput } from '../api/types';
+import type { MatchFormat, TournamentInput } from '../api/types';
+import { allowsDraw } from '../api/types';
 import { TournamentForm } from '../components/TournamentForm';
 import { extractErrorMessage } from '../api/client';
+
+/** Narrows a possibly-draw-capable format to a decisive one - these four fields are always decisive in practice (the tournament's own invariant), but the shared MatchFormat type still allows Bo2. */
+const toDecisive = (format: MatchFormat): 'Bo1' | 'Bo3' | 'Bo5' | 'Bo7' => (allowsDraw(format) ? 'Bo3' : (format as 'Bo1' | 'Bo3' | 'Bo5' | 'Bo7'));
 
 export function EditTournamentPage() {
   const { id = '' } = useParams();
@@ -58,12 +62,15 @@ export function EditTournamentPage() {
                 date: tournament.date,
                 notes: tournament.notes ?? '',
                 type: tournament.type,
-                defaultMatchFormat: tournament.defaultMatchFormat,
+                defaultMatchFormat: toDecisive(tournament.defaultMatchFormat),
                 thirdPlaceEnabled: tournament.thirdPlaceEnabled,
                 defaultScoreType: tournament.defaultScoreType,
                 groupCount: tournament.groupCount || 2,
                 tiebreakerPolicy: tournament.tiebreakerPolicy,
-                groupStageFormat: tournament.groupStageFormat,
+                groupStageMatchFormat: tournament.groupStageMatchFormat,
+                upperBracketFormat: toDecisive(tournament.upperBracketFormat),
+                lowerBracketFormat: toDecisive(tournament.lowerBracketFormat),
+                grandFinalFormat: toDecisive(tournament.grandFinalFormat),
               }}
               onSubmit={(values) => {
                 setError(null);

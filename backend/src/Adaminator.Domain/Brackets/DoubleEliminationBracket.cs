@@ -165,7 +165,9 @@ public static class DoubleEliminationBracket
         var topologyByRef = topology.ToDictionary(t => t.Ref);
         var wbRounds = WinnerRoundCount(capacity);
         var lbRounds = LoserRoundCount(capacity);
-        var format = tournament.DefaultMatchFormat;
+        var winnerFormat = tournament.PlayoffFormatFor(BracketSegment.Winner);
+        var loserFormat = tournament.PlayoffFormatFor(BracketSegment.Loser);
+        var grandFinalFormat = tournament.PlayoffFormatFor(BracketSegment.GrandFinal);
         var scoreType = tournament.DefaultScoreType;
 
         var round1IsReal = new bool[pairingCount];
@@ -240,7 +242,7 @@ public static class DoubleEliminationBracket
             if (b is not null)
             {
                 byRef[new BracketMatchRef(BracketSegment.Winner, 1, i)] =
-                    Match.Create(tournament.Id, BracketSegment.Winner, 1, i, a, b, format, scoreType);
+                    Match.Create(tournament.Id, BracketSegment.Winner, 1, i, a, b, winnerFormat, scoreType);
                 continue;
             }
 
@@ -274,7 +276,7 @@ public static class DoubleEliminationBracket
                 }
 
                 byRef[new BracketMatchRef(BracketSegment.Winner, r, i)] =
-                    Match.Create(tournament.Id, BracketSegment.Winner, r, i, a, b, format, scoreType);
+                    Match.Create(tournament.Id, BracketSegment.Winner, r, i, a, b, winnerFormat, scoreType);
             }
         }
 
@@ -285,14 +287,14 @@ public static class DoubleEliminationBracket
             {
                 if (realEntrantCount.GetValueOrDefault(lbRef) == 2)
                 {
-                    byRef[lbRef] = Match.Create(tournament.Id, BracketSegment.Loser, lbRef.Round, lbRef.IndexInRound, null, null, format, scoreType);
+                    byRef[lbRef] = Match.Create(tournament.Id, BracketSegment.Loser, lbRef.Round, lbRef.IndexInRound, null, null, loserFormat, scoreType);
                 }
             }
         }
 
         // Grand Final always exists.
         var grandFinalRef = new BracketMatchRef(BracketSegment.GrandFinal, 1, 0);
-        byRef[grandFinalRef] = Match.Create(tournament.Id, BracketSegment.GrandFinal, 1, 0, null, null, format, scoreType);
+        byRef[grandFinalRef] = Match.Create(tournament.Id, BracketSegment.GrandFinal, 1, 0, null, null, grandFinalFormat, scoreType);
 
         ApplyRoutes(byRef, topologyByRef, ResolveRealDestination);
 

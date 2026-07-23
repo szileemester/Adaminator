@@ -42,7 +42,10 @@ public class TournamentService
             _timeProvider.GetUtcNow(),
             request.GroupCount,
             request.TiebreakerPolicy,
-            request.GroupStageFormat);
+            request.GroupStageMatchFormat,
+            request.UpperBracketFormat,
+            request.LowerBracketFormat,
+            request.GrandFinalFormat);
 
         await _repository.AddAsync(tournament, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -67,7 +70,10 @@ public class TournamentService
             request.ThirdPlaceEnabled,
             request.GroupCount,
             request.TiebreakerPolicy,
-            request.GroupStageFormat);
+            request.GroupStageMatchFormat,
+            request.UpperBracketFormat,
+            request.LowerBracketFormat,
+            request.GrandFinalFormat);
 
         await _repository.SaveChangesAsync(cancellationToken);
 

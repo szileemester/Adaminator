@@ -152,7 +152,7 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
           )}
         </Stack>
       ) : (
-        <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={setHoveredId} />
+        <PlacementsList placements={bracket.placements} />
       )}
 
       {dialog}
@@ -375,7 +375,14 @@ function GroupStagePlayoffView({
 
   return (
     <Box sx={{ pb: 1 }}>
-      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
+      <Tabs
+        value={tab}
+        onChange={(_, value) => setTab(value)}
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        sx={{ mb: 2, minHeight: 36 }}
+      >
         <Tab label="Group Stage" sx={{ minHeight: 36, py: 0 }} />
         <Tab label="Tie-breakers" sx={{ minHeight: 36, py: 0 }} />
         <Tab label="Playoffs" sx={{ minHeight: 36, py: 0 }} />
@@ -389,7 +396,7 @@ function GroupStagePlayoffView({
               <Typography variant="subtitle2" color="text.secondary">
                 {groupLabel(group.groupIndex)}
               </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, alignItems: 'start' }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'start' }}>
                 <GroupMatchesTable rounds={group.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
                 <StandingsTable standings={group.standings} hoveredId={hoveredId} onHover={onHover} bracketSplit />
               </Box>
@@ -448,7 +455,7 @@ function GroupStagePlayoffView({
           </Typography>
         ))}
 
-      {tab === 3 && <PlacementsList placements={bracket.placements} hoveredId={hoveredId} onHover={onHover} />}
+      {tab === 3 && <PlacementsList placements={bracket.placements} />}
     </Box>
   );
 }
@@ -1019,15 +1026,7 @@ function StandingsTable({
   );
 }
 
-function PlacementsList({
-  placements,
-  hoveredId,
-  onHover,
-}: {
-  placements: PlacementGroup[];
-  hoveredId: string | null;
-  onHover: (participantId: string | null) => void;
-}) {
+function PlacementsList({ placements }: { placements: PlacementGroup[] }) {
   if (placements.length === 0) {
     return (
       <Typography color="text.secondary">
@@ -1061,26 +1060,13 @@ function PlacementsList({
                     </Typography>
                   ) : (
                     <Stack spacing={0.5}>
-                      {group.participants.map((participant) => {
-                        const isHovered = participant.participantId === hoveredId;
-                        return (
-                          <Box
-                            key={participant.participantId}
-                            onMouseEnter={() => onHover(participant.participantId)}
-                            onMouseLeave={() => onHover(null)}
-                            sx={{
-                              borderRadius: 1,
-                              boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
-                            }}
-                          >
-                            <ParticipantLabel
-                              name={participant.name}
-                              emoji={participant.emoji}
-                              sx={{ fontWeight: isHovered ? 700 : 400 }}
-                            />
-                          </Box>
-                        );
-                      })}
+                      {group.participants.map((participant) => (
+                        <ParticipantLabel
+                          key={participant.participantId}
+                          name={participant.name}
+                          emoji={participant.emoji}
+                        />
+                      ))}
                     </Stack>
                   )}
                 </TableCell>

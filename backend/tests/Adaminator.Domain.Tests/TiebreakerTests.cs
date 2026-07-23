@@ -212,6 +212,28 @@ public class TiebreakerTests
     }
 
     [Fact]
+    public void Two_independent_ties_in_the_same_wave_land_on_the_same_round()
+    {
+        // P1/P2 tie for the podium's top spot (2W-1L each); P3/P4 tie for 3rd/4th (1W-2L each) - two
+        // unrelated pairs, straddling cuts 1 and 3 respectively, that AlwaysMatch plays out together in
+        // one wave. Regression: generating the second cohort's match must not see the first cohort's
+        // freshly-added match (same wave, same call) and mistake it for a previous wave to number after.
+        var t = StartedRoundRobin(4, TiebreakerPolicy.AlwaysMatch);
+        Win(t, "P1", "P3");
+        Win(t, "P1", "P4");
+        Win(t, "P2", "P1");
+        Win(t, "P2", "P3");
+        Win(t, "P4", "P2");
+        Win(t, "P3", "P4");
+
+        t.StartTiebreakers();
+
+        var tiebreakers = t.Matches.Where(m => m.Segment == BracketSegment.Tiebreaker).ToList();
+        tiebreakers.Should().HaveCount(2); // P1 vs P2, and P3 vs P4 - two independent pairs
+        tiebreakers.Select(m => m.Round).Distinct().Should().Equal(1); // same wave - not staggered across rounds
+    }
+
+    [Fact]
     public void A_tiebreaker_round_that_itself_cycles_produces_another_round()
     {
         var t = StartedRoundRobin(4, TiebreakerPolicy.ComputedThenMatch);

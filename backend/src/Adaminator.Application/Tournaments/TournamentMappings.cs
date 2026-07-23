@@ -15,7 +15,10 @@ internal static class TournamentMappings
         tournament.DefaultScoreType,
         tournament.GroupCount,
         tournament.TiebreakerPolicy,
-        tournament.GroupStageFormat,
+        tournament.GroupStageMatchFormat,
+        tournament.UpperBracketFormat,
+        tournament.LowerBracketFormat,
+        tournament.GrandFinalFormat,
         tournament.Status,
         tournament.PublicToken,
         tournament.CreatedAt);
@@ -37,7 +40,10 @@ internal static class TournamentMappings
         tournament.DefaultScoreType,
         tournament.GroupCount,
         tournament.TiebreakerPolicy,
-        tournament.GroupStageFormat,
+        tournament.GroupStageMatchFormat,
+        tournament.UpperBracketFormat,
+        tournament.LowerBracketFormat,
+        tournament.GrandFinalFormat,
         tournament.Status,
         tournament.Participants.ToOrderedDtos(),
         tournament.Matches.Count > 0 ? BracketProjection.Build(tournament) : null);

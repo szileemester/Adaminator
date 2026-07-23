@@ -13,7 +13,10 @@ public record CreateTournamentRequest(
     ScoreType DefaultScoreType = ScoreType.Games,
     int GroupCount = 0,
     TiebreakerPolicy TiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
-    GroupStageFormat GroupStageFormat = GroupStageFormat.Standard);
+    MatchFormat? GroupStageMatchFormat = null,
+    MatchFormat? UpperBracketFormat = null,
+    MatchFormat? LowerBracketFormat = null,
+    MatchFormat? GrandFinalFormat = null);
 
 /// <summary>Payload for editing a Planned tournament (FR-TOUR-002).</summary>
 public record UpdateTournamentRequest(
@@ -26,7 +29,10 @@ public record UpdateTournamentRequest(
     ScoreType DefaultScoreType = ScoreType.Games,
     int GroupCount = 0,
     TiebreakerPolicy TiebreakerPolicy = TiebreakerPolicy.ComputedThenMatch,
-    GroupStageFormat GroupStageFormat = GroupStageFormat.Standard);
+    MatchFormat? GroupStageMatchFormat = null,
+    MatchFormat? UpperBracketFormat = null,
+    MatchFormat? LowerBracketFormat = null,
+    MatchFormat? GrandFinalFormat = null);
 
 /// <summary>Full admin-facing representation of a tournament.</summary>
 public record TournamentDto(
@@ -40,7 +46,10 @@ public record TournamentDto(
     ScoreType DefaultScoreType,
     int GroupCount,
     TiebreakerPolicy TiebreakerPolicy,
-    GroupStageFormat GroupStageFormat,
+    MatchFormat GroupStageMatchFormat,
+    MatchFormat UpperBracketFormat,
+    MatchFormat LowerBracketFormat,
+    MatchFormat GrandFinalFormat,
     TournamentStatus Status,
     string PublicToken,
     DateTimeOffset CreatedAt);
@@ -64,7 +73,10 @@ public record PublicTournamentDto(
     ScoreType DefaultScoreType,
     int GroupCount,
     TiebreakerPolicy TiebreakerPolicy,
-    GroupStageFormat GroupStageFormat,
+    MatchFormat GroupStageMatchFormat,
+    MatchFormat UpperBracketFormat,
+    MatchFormat LowerBracketFormat,
+    MatchFormat GrandFinalFormat,
     TournamentStatus Status,
     IReadOnlyList<ParticipantDto> Participants,
     BracketDto? Bracket);

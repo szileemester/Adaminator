@@ -530,7 +530,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             thirdPlaceEnabled = false,
             defaultScoreType = "Games",
             groupCount = 2,
-            groupStageFormat = "BestOfTwo"
+            groupStageMatchFormat = "Bo2"
         });
         create.StatusCode.Should().Be(HttpStatusCode.Created);
         var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;

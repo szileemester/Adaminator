@@ -135,7 +135,7 @@ public class RoundRobinMatchResultTests
     }
 
     [Fact]
-    public void Undoing_the_last_match_flips_a_finished_tournament_back_to_running()
+    public void A_finished_tournaments_last_match_is_locked_and_cannot_be_undone()
     {
         var tournament = StartedThreePlayer();
         var matches = tournament.Matches.ToList();
@@ -145,8 +145,11 @@ public class RoundRobinMatchResultTests
         tournament.Finish();
         tournament.Status.Should().Be(TournamentStatus.Finished);
 
-        tournament.UndoMatch(matches[2].Id);
+        tournament.CanUndo(matches[2].Id).Should().BeFalse();
 
-        tournament.Status.Should().Be(TournamentStatus.Running);
+        var act = () => tournament.UndoMatch(matches[2].Id);
+
+        act.Should().Throw<DomainException>().WithMessage("*locked*");
+        tournament.Status.Should().Be(TournamentStatus.Finished);
     }
 }
