@@ -71,6 +71,11 @@ const CARD_HEIGHT = 76;
 const ROUND_VGAP = 28;
 const CONNECTOR_WIDTH = 32;
 const CONNECTOR_COLOR = 'rgba(255,255,255,0.2)';
+// Matches theme.ts's shape.borderRadius: the card Paper clips to this radius via overflow:
+// hidden, so a slot's own hover/winner ring (drawn on an inner, unrounded Box) needs the same
+// radius on its outer corners - otherwise the ring's sharp corner gets clipped mid-curve instead
+// of following the card's rounded edge.
+const CARD_RADIUS = 10;
 const EXTRA_MATCH_GAP = 32; // space between the last round's card and the extra match's label
 const LABEL_ROW_HEIGHT = 28; // reserved height for one subtitle2 label row (a round header, or the extra match's label)
 const SECTION_GAP = 48; // vertical space between the winner and loser bracket regions
@@ -759,7 +764,6 @@ function slotHighlight(slot: BracketSlot | null, winnerId: string | null, hovere
   const isWinner = slot != null && winnerId === slot.participantId;
   const isHovered = slot != null && slot.participantId === hoveredId;
   return {
-    isWinner,
     rowSx: {
       bgcolor: isWinner ? 'rgba(63,185,80,0.15)' : 'transparent',
       boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',
@@ -769,6 +773,24 @@ function slotHighlight(slot: BracketSlot | null, winnerId: string | null, hovere
       fontWeight: isWinner || isHovered ? 700 : 400,
     },
   };
+}
+
+/**
+ * The score to show for one side of a decided match: total games won for every format except a
+ * decisive Bo1 scored by Points, where "games won" would just be 1-0 - the actual point score is
+ * more informative there. Null while the match isn't decided yet (nothing to show).
+ */
+function displayScore(match: BracketMatch, isSlotA: boolean): number | null {
+  if (match.status !== 'Completed' && match.status !== 'Forfeit') {
+    return null;
+  }
+
+  if (match.matchFormat === 'Bo1' && match.scoreType === 'Points') {
+    const entry = match.entries[0];
+    return (isSlotA ? entry?.scoreA : entry?.scoreB) ?? null;
+  }
+
+  return isSlotA ? match.aggregateScoreA : match.aggregateScoreB;
 }
 
 /** The small "FF" badge for a forfeited match, shared by the card view and the group matches table. */
@@ -808,9 +830,9 @@ function MatchCard({
       }}
       onClick={actionable ? () => onSelect!(match.id) : undefined}
     >
-      <SlotRow slot={match.participantA} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} />
+      <SlotRow slot={match.participantA} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} score={displayScore(match, true)} corner="top" />
       <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
-      <SlotRow slot={match.participantB} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} />
+      <SlotRow slot={match.participantB} winnerId={match.winnerId} hoveredId={hoveredId} onHover={onHover} score={displayScore(match, false)} corner="bottom" />
       {match.status === 'Forfeit' && <ForfeitChip sx={{ position: 'absolute', top: 4, right: 4 }} />}
     </Paper>
   );
@@ -821,13 +843,18 @@ function SlotRow({
   winnerId,
   hoveredId,
   onHover,
+  score,
+  corner,
 }: {
   slot: BracketSlot | null;
   winnerId: string | null;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
+  score: number | null;
+  /** Which end of the card this slot is at, so its hover/winner ring rounds the same corners as the card's own clip - see CARD_RADIUS. */
+  corner: 'top' | 'bottom';
 }) {
-  const { isWinner, rowSx, textSx } = slotHighlight(slot, winnerId, hoveredId);
+  const { rowSx, textSx } = slotHighlight(slot, winnerId, hoveredId);
   return (
     <Box
       onMouseEnter={slot ? () => onHover(slot.participantId) : undefined}
@@ -841,11 +868,29 @@ function SlotRow({
         justifyContent: 'space-between',
         overflow: 'hidden',
         gap: 1,
+        borderTopLeftRadius: corner === 'top' ? CARD_RADIUS : 0,
+        borderTopRightRadius: corner === 'top' ? CARD_RADIUS : 0,
+        borderBottomLeftRadius: corner === 'bottom' ? CARD_RADIUS : 0,
+        borderBottomRightRadius: corner === 'bottom' ? CARD_RADIUS : 0,
         ...rowSx,
       }}
     >
       <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} sx={textSx} />
-      {isWinner && <Chip size="small" color="success" label="W" />}
+      {score != null && (
+        <Box
+          sx={{
+            minWidth: 26,
+            textAlign: 'center',
+            flexShrink: 0,
+            border: '1px solid rgba(255,255,255,0.25)',
+            borderRadius: 0.5,
+            px: 0.5,
+            py: 0.25,
+          }}
+        >
+          <Typography variant="body2" sx={textSx}>{score}</Typography>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -963,7 +1008,7 @@ function StandingsTable({
       <Typography variant="subtitle2" color="text.secondary">
         Standings
       </Typography>
-      <TableContainer component={Paper} variant="outlined" sx={{ maxWidth: 480 }}>
+      <TableContainer component={Paper} variant="outlined">
         <Table size="small">
           <TableHead>
             <TableRow>
