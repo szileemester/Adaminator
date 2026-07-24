@@ -275,21 +275,6 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
-    public async Task Winner_only_scoring_is_rejected_for_a_non_bo1_match()
-    {
-        var client = await CreateAuthenticatedClientAsync();
-        var tournamentId = await CreateStartedFourPlayerTournamentAsync(client);
-        var bracket = await GetBracketAsync(client, tournamentId);
-        var semi0 = bracket.WinnerRounds.Single(r => r.Round == 1).Matches[0];
-
-        var save = await client.PutAsJsonAsync(
-            $"/api/tournaments/{tournamentId}/matches/{semi0.Id}/result",
-            new { matchFormat = "Bo3", scoreType = "WinnerOnly", entries = new[] { Entry(true) } });
-
-        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-    }
-
-    [Fact]
     public async Task Forfeit_without_a_valid_winner_is_rejected()
     {
         var client = await CreateAuthenticatedClientAsync();
@@ -359,12 +344,12 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
-    /// <summary>Completes a Bo1 / Winner Only match for participant A (the Group Stage + Playoff default scoring).</summary>
-    private static async Task CompleteWinnerOnlyAsync(HttpClient client, Guid tournamentId, Guid matchId)
+    /// <summary>Completes a Bo1 match for participant A (the Group Stage + Playoff default scoring).</summary>
+    private static async Task CompleteBo1Async(HttpClient client, Guid tournamentId, Guid matchId)
     {
         var response = await client.PostAsJsonAsync(
             $"/api/tournaments/{tournamentId}/matches/{matchId}/complete",
-            new { matchFormat = "Bo1", scoreType = "WinnerOnly", entries = new[] { Entry(true) } });
+            new { matchFormat = "Bo1", scoreType = "Games", entries = new[] { Entry(true) } });
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
@@ -374,7 +359,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var aWon = string.CompareOrdinal(match.ParticipantA!.Name, match.ParticipantB!.Name) < 0;
         var response = await client.PostAsJsonAsync(
             $"/api/tournaments/{tournamentId}/matches/{match.Id}/complete",
-            new { matchFormat = "Bo1", scoreType = "WinnerOnly", entries = new[] { Entry(aWon) } });
+            new { matchFormat = "Bo1", scoreType = "Games", entries = new[] { Entry(aWon) } });
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
@@ -396,7 +381,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
                 return;
             }
 
-            await CompleteWinnerOnlyAsync(client, tournamentId, next.Id);
+            await CompleteBo1Async(client, tournamentId, next.Id);
         }
 
         throw new InvalidOperationException("Playoff did not resolve within the iteration guard.");
@@ -414,7 +399,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             type = "GroupStagePlayoff",
             defaultMatchFormat = "Bo1",
             thirdPlaceEnabled = false,
-            defaultScoreType = "WinnerOnly",
+            defaultScoreType = "Games",
             groupCount = 2
         });
         create.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -471,7 +456,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             type = "GroupStagePlayoff",
             defaultMatchFormat = "Bo1",
             thirdPlaceEnabled = false,
-            defaultScoreType = "WinnerOnly",
+            defaultScoreType = "Games",
             groupCount = 2,
             tiebreakerPolicy = "ComputedThenMatch"
         });
@@ -490,7 +475,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         var groupBracket = await GetBracketAsync(client, tournamentId);
         foreach (var groupMatch in groupBracket.Groups.SelectMany(g => g.Rounds).SelectMany(r => r.Matches))
         {
-            await CompleteWinnerOnlyAsync(client, tournamentId, groupMatch.Id);
+            await CompleteBo1Async(client, tournamentId, groupMatch.Id);
         }
 
         var afterGroups = await GetBracketAsync(client, tournamentId);
@@ -508,7 +493,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
 
         foreach (var match in tiebreakerMatches)
         {
-            await CompleteWinnerOnlyAsync(client, tournamentId, match.Id);
+            await CompleteBo1Async(client, tournamentId, match.Id);
         }
 
         var resolved = await GetBracketAsync(client, tournamentId);
@@ -576,7 +561,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             type = "GroupStagePlayoff",
             defaultMatchFormat = "Bo1",
             thirdPlaceEnabled = false,
-            defaultScoreType = "WinnerOnly",
+            defaultScoreType = "Games",
             groupCount = 1
         });
 
@@ -595,7 +580,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             type = "GroupStagePlayoff",
             defaultMatchFormat = "Bo1",
             thirdPlaceEnabled = false,
-            defaultScoreType = "WinnerOnly",
+            defaultScoreType = "Games",
             groupCount = 2
         });
         var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
@@ -621,7 +606,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             type = "GroupStagePlayoff",
             defaultMatchFormat = "Bo1",
             thirdPlaceEnabled = false,
-            defaultScoreType = "WinnerOnly",
+            defaultScoreType = "Games",
             groupCount = 2
         });
         var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;

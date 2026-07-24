@@ -15,7 +15,7 @@ public class GroupStagePlayoffMatchResultTests
     private static Tournament Planned(int participantCount, int groupCount)
     {
         var tournament = Tournament.Create(
-            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.WinnerOnly, false, CreatedAt, groupCount);
+            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt, groupCount);
         for (var i = 1; i <= participantCount; i++)
         {
             tournament.AddParticipant($"P{i}");
@@ -33,14 +33,14 @@ public class GroupStagePlayoffMatchResultTests
     }
 
     private static void CompleteA(Tournament tournament, Match match) =>
-        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, true) }, Now);
+        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, true) }, Now);
 
     /// <summary>Completes a group match with the stronger (lower within-group seed) participant winning, so each group ends in a strict, tie-free order.</summary>
     private static void CompleteSeeded(Tournament tournament, Match match)
     {
         var seedA = tournament.Participants.First(p => p.Id == match.ParticipantAId).Seed;
         var seedB = tournament.Participants.First(p => p.Id == match.ParticipantBId).Seed;
-        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, seedA < seedB) }, Now);
+        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, seedA < seedB) }, Now);
     }
 
     private static void DecideAllGroupMatches(Tournament tournament)

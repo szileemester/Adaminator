@@ -41,7 +41,8 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
 
         builder.Property(m => m.ScoreType)
             .HasConversion<string>()
-            .HasMaxLength(20);
+            .HasMaxLength(20)
+            .IsRequired();
 
         builder.Property(m => m.CompletedAt);
         builder.Property(m => m.CompletionSequence);

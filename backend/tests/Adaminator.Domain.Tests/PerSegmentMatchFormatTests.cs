@@ -97,7 +97,7 @@ public class PerSegmentMatchFormatTests
         se.GroupStageMatchFormat.Should().Be(MatchFormat.Bo3);
 
         var rr = Tournament.Create(
-            "League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, ScoreType.WinnerOnly, thirdPlaceEnabled: false, CreatedAt,
+            "League", Date, null, TournamentType.RoundRobin, MatchFormat.Bo1, ScoreType.Games, thirdPlaceEnabled: false, CreatedAt,
             upperBracketFormat: MatchFormat.Bo7, lowerBracketFormat: MatchFormat.Bo5, grandFinalFormat: MatchFormat.Bo5, groupStageMatchFormat: MatchFormat.Bo2);
 
         rr.UpperBracketFormat.Should().Be(MatchFormat.Bo1);

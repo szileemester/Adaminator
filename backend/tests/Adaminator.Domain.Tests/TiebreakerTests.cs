@@ -15,7 +15,7 @@ public class TiebreakerTests
     // ---- Round Robin helpers ----
 
     private static Tournament StartedRoundRobin(
-        int participants, TiebreakerPolicy policy, MatchFormat format = MatchFormat.Bo1, ScoreType scoreType = ScoreType.WinnerOnly)
+        int participants, TiebreakerPolicy policy, MatchFormat format = MatchFormat.Bo1, ScoreType scoreType = ScoreType.Games)
     {
         var tournament = Tournament.Create(
             "League", Date, null, TournamentType.RoundRobin, format, scoreType, false, CreatedAt, tiebreakerPolicy: policy);
@@ -38,12 +38,12 @@ public class TiebreakerTests
             && ((m.ParticipantAId == idA && m.ParticipantBId == idB) || (m.ParticipantAId == idB && m.ParticipantBId == idA)));
     }
 
-    /// <summary>Completes the round-robin match between two participants (WinnerOnly, Bo1) with <paramref name="winner"/> winning.</summary>
+    /// <summary>Completes the round-robin match between two participants (Games, Bo1) with <paramref name="winner"/> winning.</summary>
     private static void Win(Tournament tournament, string winner, string loser)
     {
         var match = RoundRobinMatch(tournament, winner, loser);
         var winnerIsA = match.ParticipantAId == tournament.Participants.First(p => p.Name == winner).Id;
-        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, Now);
+        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, Now);
     }
 
     /// <summary>Completes a Games-scored match with <paramref name="winner"/> taking <paramref name="winnerGames"/>-<paramref name="loserGames"/>, so a game differential exists.</summary>
@@ -264,7 +264,7 @@ public class TiebreakerTests
             var nameA = t.Participants.First(p => p.Id == match.ParticipantAId).Name;
             var nameB = t.Participants.First(p => p.Id == match.ParticipantBId).Name;
             t.CompleteMatch(
-                match.Id, match.MatchFormat, ScoreType.WinnerOnly,
+                match.Id, match.MatchFormat, ScoreType.Games,
                 new List<ScoreEntryInput> { new(null, null, string.CompareOrdinal(nameA, nameB) < 0) }, Now);
         }
 
@@ -299,7 +299,7 @@ public class TiebreakerTests
     private static Tournament StartedUnevenGroupStage(int participants, int groupCount)
     {
         var t = Tournament.Create(
-            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.WinnerOnly, false, CreatedAt,
+            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt,
             groupCount: groupCount, tiebreakerPolicy: TiebreakerPolicy.ComputedThenMatch);
         for (var i = 1; i <= participants; i++)
         {
@@ -318,7 +318,7 @@ public class TiebreakerTests
         {
             var seedA = t.Participants.First(p => p.Id == m.ParticipantAId).Seed;
             var seedB = t.Participants.First(p => p.Id == m.ParticipantBId).Seed;
-            t.CompleteMatch(m.Id, m.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, seedA < seedB) }, Now);
+            t.CompleteMatch(m.Id, m.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, seedA < seedB) }, Now);
         }
     }
 
@@ -375,7 +375,7 @@ public class TiebreakerTests
             var nameA = t.Participants.First(p => p.Id == match.ParticipantAId).Name;
             var nameB = t.Participants.First(p => p.Id == match.ParticipantBId).Name;
             t.CompleteMatch(
-                match.Id, match.MatchFormat, ScoreType.WinnerOnly,
+                match.Id, match.MatchFormat, ScoreType.Games,
                 new List<ScoreEntryInput> { new(null, null, string.CompareOrdinal(nameA, nameB) < 0) }, Now);
         }
 
@@ -407,7 +407,7 @@ public class TiebreakerTests
             var aIndex = members.IndexOf(match.ParticipantAId!.Value);
             var bIndex = members.IndexOf(match.ParticipantBId!.Value);
             var aWins = (aIndex + 1) % members.Count == bIndex;
-            t.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, aWins) }, Now);
+            t.CompleteMatch(match.Id, match.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, aWins) }, Now);
         }
     }
 
@@ -457,7 +457,7 @@ public class TiebreakerTests
 
         var tb = t.Matches.First(m => m.Segment == BracketSegment.Tiebreaker);
         var winnerIsA = true;
-        t.CompleteMatch(tb.Id, tb.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, Now);
+        t.CompleteMatch(tb.Id, tb.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, Now);
 
         t.CanUndo(tb.Id).Should().BeTrue();
         t.UndoMatch(tb.Id);
@@ -468,7 +468,7 @@ public class TiebreakerTests
     {
         var match = RoundRobinMatch(tournament, winner, loser, segment);
         var winnerIsA = match.ParticipantAId == tournament.Participants.First(p => p.Name == winner).Id;
-        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, Now);
+        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, Now);
     }
 
     // ---- Group Stage + Playoff ----
@@ -476,7 +476,7 @@ public class TiebreakerTests
     private static Tournament StartedGroupStage(TiebreakerPolicy policy)
     {
         var t = Tournament.Create(
-            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.WinnerOnly, false, CreatedAt, groupCount: 2, tiebreakerPolicy: policy);
+            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt, groupCount: 2, tiebreakerPolicy: policy);
         for (var i = 1; i <= 8; i++)
         {
             t.AddParticipant($"P{i}");
@@ -488,7 +488,7 @@ public class TiebreakerTests
     }
 
     private static void CompleteAWins(Tournament t, Match m) =>
-        t.CompleteMatch(m.Id, m.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, true) }, Now);
+        t.CompleteMatch(m.Id, m.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, true) }, Now);
 
     [Fact]
     public void A_group_cycle_blocks_the_playoff_until_tiebreakers_are_played()

@@ -28,7 +28,7 @@ public class RoundRobinMatchResultTests
     private static void Complete(Tournament tournament, Match match, Guid winnerId, DateTimeOffset completedAt)
     {
         var winnerIsA = winnerId == match.ParticipantAId;
-        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.WinnerOnly, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, completedAt);
+        tournament.CompleteMatch(match.Id, match.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, winnerIsA) }, completedAt);
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public class RoundRobinMatchResultTests
 
         tournament.UndoMatch(matches[0].Id);
 
-        // WinnerOnly scoring still records one ScoreEntry, so Undo restores to InProgress (not
+        // Games scoring still records one ScoreEntry, so Undo restores to InProgress (not
         // Pending) - same rule Match.Undo() already applies for every tournament type.
         matches[0].Status.Should().Be(MatchStatus.InProgress);
         matches[0].WinnerId.Should().BeNull();

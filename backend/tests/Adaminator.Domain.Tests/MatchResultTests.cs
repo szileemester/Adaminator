@@ -112,18 +112,6 @@ public class MatchResultTests
     }
 
     [Fact]
-    public void CompleteMatch_rejects_winner_only_scoring_for_a_non_bo1_match()
-    {
-        var tournament = StartedFourPlayer();
-        var match = Semifinal(tournament, 0);
-
-        var entries = new List<ScoreEntryInput> { new(null, null, true) };
-        var act = () => tournament.CompleteMatch(match.Id, MatchFormat.Bo3, ScoreType.WinnerOnly, entries, Now);
-
-        act.Should().Throw<DomainException>().WithMessage("*Winner Only*BO1*");
-    }
-
-    [Fact]
     public void CompleteMatch_rejects_more_games_than_the_format_allows()
     {
         var tournament = StartedFourPlayer();

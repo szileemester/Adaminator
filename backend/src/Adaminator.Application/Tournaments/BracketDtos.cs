@@ -14,7 +14,7 @@ public record BracketMatchDto(
     MatchStatus Status,
     Guid? WinnerId,
     MatchFormat MatchFormat,
-    ScoreType? ScoreType,
+    ScoreType ScoreType,
     IReadOnlyList<ScoreEntryDto> Entries,
     int AggregateScoreA,
     int AggregateScoreB,

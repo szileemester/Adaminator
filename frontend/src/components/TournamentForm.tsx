@@ -25,7 +25,7 @@ const schema = z.object({
   // Single Elimination + Round Robin only: their one match format - never Bo2, they have no group stage.
   defaultMatchFormat: decisiveFormat,
   thirdPlaceEnabled: z.boolean(),
-  defaultScoreType: z.enum(['WinnerOnly', 'Games', 'Points', 'Sets']),
+  defaultScoreType: z.enum(['Games', 'Points']),
   groupCount: z.number().int('Enter a whole number').min(2, 'At least 2 groups').max(16, 'At most 16 groups'),
   tiebreakerPolicy: z.enum(['ComputedThenMatch', 'AlwaysMatch']),
   // Group Stage + Playoff only: the one format picker that allows Bo2 (draws, ranked by games won).
@@ -43,7 +43,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const decisiveFormats: MatchFormat[] = ['Bo1', 'Bo3', 'Bo5', 'Bo7'];
 const groupStageMatchFormats: MatchFormat[] = ['Bo1', 'Bo2', 'Bo3', 'Bo5', 'Bo7'];
 const tournamentTypes: TournamentType[] = ['SingleElimination', 'DoubleElimination', 'RoundRobin', 'GroupStagePlayoff'];
-const scoreTypes: ScoreType[] = ['Games', 'Sets', 'Points', 'WinnerOnly'];
+const scoreTypes: ScoreType[] = ['Games', 'Points'];
 const tiebreakerPolicies: TiebreakerPolicy[] = ['ComputedThenMatch', 'AlwaysMatch'];
 
 interface TournamentFormProps {
@@ -130,17 +130,6 @@ export function TournamentForm({
   const usesBracketFormats = selectedType === 'DoubleElimination' || isGroupStagePlayoff;
   // Only Round Robin and Group Stage + Playoff produce round-robin standings that can tie in a way that matters.
   const showsTiebreakerPolicy = selectedType === 'RoundRobin' || isGroupStagePlayoff;
-  const [defaultMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat, selectedScoreType] = watch([
-    'defaultMatchFormat',
-    'upperBracketFormat',
-    'lowerBracketFormat',
-    'grandFinalFormat',
-    'defaultScoreType',
-  ]);
-  // Winner Only scoring needs every active format to be Bo1 - whichever fields are relevant for the
-  // selected type (the Group Stage format is exempt server-side, so it is not part of this check).
-  const activeFormats = usesBracketFormats ? [upperBracketFormat, lowerBracketFormat, grandFinalFormat] : [defaultMatchFormat];
-  const allBo1 = activeFormats.every((format) => format === 'Bo1');
 
   // Third Place Match is Single-Elimination only; clear it when switching away from it.
   useEffect(() => {
@@ -148,13 +137,6 @@ export function TournamentForm({
       setValue('thirdPlaceEnabled', false);
     }
   }, [isSingleElimination, setValue]);
-
-  // Winner Only scoring is valid only when every active format is BO1; fall back to Games otherwise.
-  useEffect(() => {
-    if (!allBo1 && selectedScoreType === 'WinnerOnly') {
-      setValue('defaultScoreType', 'Games');
-    }
-  }, [allBo1, selectedScoreType, setValue]);
 
   const submit = handleSubmit((values) => {
     onSubmit({
@@ -164,7 +146,7 @@ export function TournamentForm({
       type: values.type,
       defaultMatchFormat: values.defaultMatchFormat,
       thirdPlaceEnabled: isSingleElimination && values.thirdPlaceEnabled,
-      defaultScoreType: !allBo1 && values.defaultScoreType === 'WinnerOnly' ? 'Games' : values.defaultScoreType,
+      defaultScoreType: values.defaultScoreType,
       groupCount: isGroupStagePlayoff ? values.groupCount : 0,
       tiebreakerPolicy: values.tiebreakerPolicy,
       groupStageMatchFormat: isGroupStagePlayoff ? values.groupStageMatchFormat : values.defaultMatchFormat,
@@ -217,7 +199,7 @@ export function TournamentForm({
           render={({ field }) => (
             <TextField select label="Default score type" {...field}>
               {scoreTypes.map((type) => (
-                <MenuItem key={type} value={type} disabled={type === 'WinnerOnly' && !allBo1}>
+                <MenuItem key={type} value={type}>
                   {scoreTypeLabels[type]}
                 </MenuItem>
               ))}

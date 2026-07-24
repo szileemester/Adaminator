@@ -112,23 +112,14 @@ public class TournamentTests
     }
 
     [Fact]
-    public void Create_rejects_winner_only_scoring_paired_with_a_non_bo1_default_format()
-    {
-        var act = () => Tournament.Create(
-            "Summer Cup", SampleDate, null, TournamentType.SingleElimination, MatchFormat.Bo3, ScoreType.WinnerOnly, false, CreatedAt);
-
-        act.Should().Throw<DomainException>().WithMessage("*Winner Only*BO1*");
-    }
-
-    [Fact]
     public void UpdateDetails_changes_the_default_score_type()
     {
         var tournament = CreateValid();
 
         tournament.UpdateDetails(
             "Summer Cup", SampleDate, null,
-            TournamentType.SingleElimination, MatchFormat.Bo3, ScoreType.Sets, false);
+            TournamentType.SingleElimination, MatchFormat.Bo3, ScoreType.Points, false);
 
-        tournament.DefaultScoreType.Should().Be(ScoreType.Sets);
+        tournament.DefaultScoreType.Should().Be(ScoreType.Points);
     }
 }

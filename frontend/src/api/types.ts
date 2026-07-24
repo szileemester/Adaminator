@@ -61,7 +61,7 @@ export interface BracketSlot {
   emoji: string | null;
 }
 
-export type ScoreType = 'WinnerOnly' | 'Games' | 'Points' | 'Sets';
+export type ScoreType = 'Games' | 'Points';
 
 export interface ScoreEntry {
   sequenceNumber: number;
@@ -80,7 +80,7 @@ export interface BracketMatch {
   status: MatchStatus;
   winnerId: string | null;
   matchFormat: MatchFormat;
-  scoreType: ScoreType | null;
+  scoreType: ScoreType;
   entries: ScoreEntry[];
   aggregateScoreA: number;
   aggregateScoreB: number;
@@ -251,10 +251,8 @@ export function formatParticipantName(name: string, emoji: string | null | undef
 }
 
 export const scoreTypeLabels: Record<ScoreType, string> = {
-  WinnerOnly: 'Winner Only',
   Games: 'Games',
   Points: 'Points',
-  Sets: 'Sets',
 };
 
 /** Number of game/set wins one participant needs to win a match of the given format. */

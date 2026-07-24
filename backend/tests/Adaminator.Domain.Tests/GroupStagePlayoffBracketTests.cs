@@ -12,7 +12,7 @@ public class GroupStagePlayoffBracketTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 7, 18, 10, 0, 0, TimeSpan.Zero);
 
     private static Tournament NewTournament(int groupCount) =>
-        Tournament.Create("Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.WinnerOnly, false, CreatedAt, groupCount);
+        Tournament.Create("Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt, groupCount);
 
     // ---- Shape validation ----
 

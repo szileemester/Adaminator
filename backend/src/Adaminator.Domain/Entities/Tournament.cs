@@ -986,15 +986,6 @@ public class Tournament
             throw new DomainException("Only the Group Stage format may allow draws (Best of 2).");
         }
 
-        // The Group Stage format is exempt: its own draw-capable Bo2 already carries a scoreType
-        // exception at bracket-build time (BuildGroupStage), so it is not held to this rule here.
-        if (defaultScoreType == ScoreType.WinnerOnly
-            && (defaultMatchFormat != MatchFormat.Bo1 || resolvedUpperFormat != MatchFormat.Bo1
-                || resolvedLowerFormat != MatchFormat.Bo1 || resolvedGrandFinalFormat != MatchFormat.Bo1))
-        {
-            throw new DomainException("Winner Only scoring is valid only for BO1 matches.");
-        }
-
         if (type == TournamentType.GroupStagePlayoff && groupCount < 2)
         {
             throw new DomainException("Group Stage + Playoff needs at least 2 groups.");

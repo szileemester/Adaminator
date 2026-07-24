@@ -134,7 +134,7 @@ public class BestOfTwoGroupTests
     public void Standard_group_is_unaffected_and_ranks_by_match_wins()
     {
         var t = Tournament.Create(
-            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.WinnerOnly, false, CreatedAt, groupCount: 2);
+            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt, groupCount: 2);
 
         t.GroupStageMatchFormat.Should().Be(MatchFormat.Bo1);
         t.RanksGroupsByGamesWon.Should().BeFalse();

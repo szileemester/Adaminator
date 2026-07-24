@@ -50,7 +50,11 @@ public class Match
     /// <summary>The losing participant, once decided; null otherwise.</summary>
     public Guid? LoserId => WinnerId is null ? null : (WinnerId == ParticipantAId ? ParticipantBId : ParticipantAId);
 
-    public ScoreType? ScoreType { get; private set; }
+    /// <summary>
+    /// Fixed at creation from the tournament's default score type - like <see cref="MatchFormat"/>,
+    /// never a per-match choice at result-entry time.
+    /// </summary>
+    public ScoreType ScoreType { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
 
     /// <summary>Monotonic, tournament-scoped ordinal assigned when this match is decided; used to find the latest completed match for Undo (FR-UNDO-001).</summary>
@@ -277,11 +281,6 @@ public class Match
         if (entries.Count > maxGames)
         {
             throw new DomainException($"A {matchFormat} match cannot have more than {maxGames} game(s)/set(s).");
-        }
-
-        if (scoreType == DomainScoreType.WinnerOnly && matchFormat != DomainMatchFormat.Bo1)
-        {
-            throw new DomainException("Winner Only scoring is valid only for BO1 matches.");
         }
 
         var built = new List<ScoreEntry>(entries.Count);

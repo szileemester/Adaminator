@@ -139,24 +139,6 @@ public class TournamentApiTests : IClassFixture<ApiFactory>
         created!.DefaultScoreType.Should().Be("Games");
     }
 
-    [Fact]
-    public async Task Winner_only_default_score_type_is_rejected_for_a_non_bo1_default_format()
-    {
-        var client = await CreateAuthenticatedClientAsync();
-
-        var response = await client.PostAsJsonAsync("/api/tournaments", new
-        {
-            name = "Invalid Score Cup",
-            date = "2026-07-14",
-            type = "SingleElimination",
-            defaultMatchFormat = "Bo3",
-            thirdPlaceEnabled = false,
-            defaultScoreType = "WinnerOnly"
-        });
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-    }
-
     private async Task<HttpClient> CreateAuthenticatedClientAsync()
     {
         var client = _factory.CreateClient();

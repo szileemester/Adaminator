@@ -38,10 +38,6 @@ public class CreateTournamentRequestValidator : AbstractValidator<CreateTourname
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
             .WithMessage("Third place match is available only for Single Elimination tournaments.");
 
-        RuleFor(x => x.DefaultScoreType)
-            .Must((request, scoreType) => !(scoreType == ScoreType.WinnerOnly && request.DefaultMatchFormat != MatchFormat.Bo1))
-            .WithMessage("Winner Only scoring is valid only for BO1 matches.");
-
         RuleFor(x => x.GroupCount)
             .GreaterThanOrEqualTo(2).When(x => x.Type == TournamentType.GroupStagePlayoff)
             .WithMessage("Group Stage + Playoff needs at least 2 groups.");
@@ -81,10 +77,6 @@ public class UpdateTournamentRequestValidator : AbstractValidator<UpdateTourname
         RuleFor(x => x.ThirdPlaceEnabled)
             .Must((request, thirdPlace) => !(request.Type != TournamentType.SingleElimination && thirdPlace))
             .WithMessage("Third place match is available only for Single Elimination tournaments.");
-
-        RuleFor(x => x.DefaultScoreType)
-            .Must((request, scoreType) => !(scoreType == ScoreType.WinnerOnly && request.DefaultMatchFormat != MatchFormat.Bo1))
-            .WithMessage("Winner Only scoring is valid only for BO1 matches.");
 
         RuleFor(x => x.GroupCount)
             .GreaterThanOrEqualTo(2).When(x => x.Type == TournamentType.GroupStagePlayoff)

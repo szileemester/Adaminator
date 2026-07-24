@@ -59,15 +59,13 @@ public static class GroupStagePlayoffBracket
 
     /// <summary>
     /// Builds the group-stage matches: one round robin per group, each match tagged with its group index.
-    /// A Best-of-2 group plays draw-capable <see cref="MatchFormat.Bo2"/> matches (scored as games,
-    /// since Winner Only is Bo1-only); the playoff reads its own, always-decisive segment formats.
+    /// A Best-of-2 group plays draw-capable <see cref="MatchFormat.Bo2"/> matches; the playoff reads its
+    /// own, always-decisive segment formats.
     /// </summary>
     public static List<Match> BuildGroupStage(Tournament tournament)
     {
         var format = tournament.GroupStageMatchFormat;
-        var scoreType = format.AllowsDraw() && tournament.DefaultScoreType == ScoreType.WinnerOnly
-            ? ScoreType.Games
-            : tournament.DefaultScoreType;
+        var scoreType = tournament.DefaultScoreType;
 
         var matches = new List<Match>();
         for (var g = 0; g < tournament.GroupCount; g++)
