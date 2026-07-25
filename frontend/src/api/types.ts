@@ -245,9 +245,12 @@ export function groupLabel(groupIndex: number): string {
   return `Group ${String.fromCharCode(65 + groupIndex)}`;
 }
 
-/** Name prefixed with the emoji, for the few places that take a plain string instead of JSX (Chip/TextField labels, dialog titles). */
+/** Shown in place of a real emoji until the admin picks one - a participant is never displayed with no emoji at all. */
+export const DEFAULT_PARTICIPANT_EMOJI = '😐';
+
+/** Name prefixed with the emoji (or the "not set" placeholder), for the few places that take a plain string instead of JSX (Chip/TextField labels, dialog titles). */
 export function formatParticipantName(name: string, emoji: string | null | undefined): string {
-  return emoji ? `${emoji} ${name}` : name;
+  return `${emoji ?? DEFAULT_PARTICIPANT_EMOJI} ${name}`;
 }
 
 export const scoreTypeLabels: Record<ScoreType, string> = {
