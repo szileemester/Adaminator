@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using Adaminator.Api.Auth;
 using Adaminator.Api.Infrastructure;
 using Adaminator.Application;
@@ -63,6 +64,22 @@ builder.Services.AddCors(options =>
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database");
 
+// ---- Rate limiting ----
+// The admin password is a single shared secret with no lockout, so /api/auth/login gets its own
+// per-IP throttle to make brute-forcing it impractical.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("login", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+});
+
 // ---- Error handling ----
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
@@ -94,10 +111,27 @@ await DatabaseMigrator.MigrateAsync(app);
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers.Append("X-Content-Type-Options", "nosniff");
+    headers.Append("X-Frame-Options", "DENY");
+    headers.Append("Referrer-Policy", "no-referrer");
+    headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    await next();
+});
+
+// Swagger exposes the full API schema, which is free reconnaissance for an attacker; the app is
+// small enough that Development-only is sufficient rather than gating it behind auth as well.
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 app.UseCors(corsPolicy);
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
