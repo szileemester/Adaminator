@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link as RouterLink } from 'react-router-dom';
 import {
@@ -8,10 +9,15 @@ import {
   CardActionArea,
   CardContent,
   CircularProgress,
+  InputAdornment,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { listTournaments } from '../api/tournaments';
 import type { TournamentStatus, TournamentSummary } from '../api/types';
 import { tournamentTypeLabels } from '../api/types';
@@ -29,6 +35,14 @@ export function DashboardPage() {
     queryKey: ['tournaments'],
     queryFn: listTournaments,
   });
+  const [search, setSearch] = useState('');
+  const [showFinished, setShowFinished] = useState(false);
+
+  const query = search.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (query ? data?.filter((t) => t.name.toLowerCase().includes(query)) : data),
+    [data, query],
+  );
 
   return (
     <Stack spacing={4}>
@@ -38,6 +52,25 @@ export function DashboardPage() {
           Create tournament
         </Button>
       </Stack>
+
+      {data && data.length > 0 && (
+        <TextField
+          size="small"
+          placeholder="Search tournaments"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          sx={{ maxWidth: 360 }}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+      )}
 
       {isLoading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -51,28 +84,50 @@ export function DashboardPage() {
         <Typography color="text.secondary">No tournaments yet. Create your first one.</Typography>
       )}
 
-      {data &&
+      {filtered && filtered.length === 0 && data && data.length > 0 && (
+        <Typography color="text.secondary">No tournaments match "{search.trim()}".</Typography>
+      )}
+
+      {filtered &&
         sections.map((section) => {
-          const items = data.filter((t) => t.status === section.status);
+          const items = filtered.filter((t) => t.status === section.status);
           if (items.length === 0) {
             return null;
           }
+          // Finished tournaments accumulate over time and are rarely revisited, so they start
+          // collapsed - unless a search is narrowing the list, in which case hiding a match would
+          // be more surprising than showing it.
+          const isFinished = section.status === 'Finished';
+          const collapsed = isFinished && !showFinished && query === '';
           return (
             <Stack key={section.status} spacing={2}>
-              <Typography variant="h6" color="text.secondary">
-                {section.title}
-              </Typography>
-              <Box
-                sx={{
-                  display: 'grid',
-                  gap: 2,
-                  gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' },
-                }}
-              >
-                {items.map((tournament) => (
-                  <TournamentCard key={tournament.id} tournament={tournament} />
-                ))}
-              </Box>
+              {isFinished ? (
+                <Button
+                  onClick={() => setShowFinished((prev) => !prev)}
+                  startIcon={collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
+                  color="inherit"
+                  sx={{ alignSelf: 'flex-start', color: 'text.secondary' }}
+                >
+                  {section.title} ({items.length})
+                </Button>
+              ) : (
+                <Typography variant="h6" color="text.secondary">
+                  {section.title}
+                </Typography>
+              )}
+              {!collapsed && (
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gap: 2,
+                    gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' },
+                  }}
+                >
+                  {items.map((tournament) => (
+                    <TournamentCard key={tournament.id} tournament={tournament} />
+                  ))}
+                </Box>
+              )}
             </Stack>
           );
         })}
