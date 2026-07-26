@@ -30,5 +30,8 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("ConnectionStrings:Postgres", _database.GetConnectionString());
         builder.UseSetting("Admin:Password", AdminPassword);
         builder.UseSetting("Jwt:Key", "integration-test-signing-key-that-is-sufficiently-long-1234567890");
+        // WebApplicationFactory's in-memory TestServer has no real client IP, so every login in the
+        // whole run shares one rate-limit bucket - raise it well above what any test class needs.
+        builder.UseSetting("RateLimiting:Login:PermitLimit", "1000");
     }
 }

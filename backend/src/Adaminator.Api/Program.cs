@@ -6,6 +6,7 @@ using Adaminator.Api.Infrastructure;
 using Adaminator.Application;
 using Adaminator.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
@@ -64,9 +65,25 @@ builder.Services.AddCors(options =>
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database");
 
+// ---- Forwarded headers ----
+// Fly's edge proxy terminates the real client connection, so without this, every request would
+// appear to come from the proxy's own address - defeating per-IP rate limiting below. Fly is the
+// only hop in front of this app and its proxy address isn't a fixed one we can pin, so the
+// X-Forwarded-For header is trusted as-is rather than restricted by KnownProxies/KnownNetworks.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 // ---- Rate limiting ----
 // The admin password is a single shared secret with no lockout, so /api/auth/login gets its own
-// per-IP throttle to make brute-forcing it impractical.
+// per-IP throttle to make brute-forcing it impractical. The limit is configurable because
+// integration tests share one "connection" across dozens of logins run in seconds.
+builder.Services.Configure<LoginRateLimitOptions>(builder.Configuration.GetSection(LoginRateLimitOptions.SectionName));
+var loginRateLimit = builder.Configuration.GetSection(LoginRateLimitOptions.SectionName).Get<LoginRateLimitOptions>()
+    ?? new LoginRateLimitOptions();
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -74,8 +91,8 @@ builder.Services.AddRateLimiter(options =>
         partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 5,
-            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = loginRateLimit.PermitLimit,
+            Window = TimeSpan.FromSeconds(loginRateLimit.WindowSeconds),
             QueueLimit = 0,
         }));
 });
@@ -109,6 +126,7 @@ var app = builder.Build();
 await DatabaseMigrator.MigrateAsync(app);
 
 app.UseExceptionHandler();
+app.UseForwardedHeaders();
 app.UseSerilogRequestLogging();
 
 app.Use(async (context, next) =>
