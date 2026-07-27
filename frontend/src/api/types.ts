@@ -338,3 +338,41 @@ export function matchFormatGameCount(format: MatchFormat): number {
 export function allowsDraw(format: MatchFormat): boolean {
   return matchFormatGameCount(format) % 2 === 0;
 }
+
+/**
+ * Whether a match has a final result. The one definition of "terminal" over {@link MatchStatus}, so a
+ * new terminal state is a single edit rather than a hunt through every screen that shows a score.
+ */
+export function isDecided(match: { status: MatchStatus }): boolean {
+  return match.status === 'Completed' || match.status === 'Forfeit';
+}
+
+/** Whether a round exists and every match in it is decided. */
+export function roundIsDecided(round: BracketRound): boolean {
+  return round.matches.length > 0 && round.matches.every(isDecided);
+}
+
+/**
+ * Locates a match anywhere in a bracket. Deliberately lives next to the `Bracket` interface: it has to
+ * name every collection that can hold matches, and a new one added above without a matching line here
+ * fails silently - clicking such a match would simply open nothing. A Swiss group stage is the easy
+ * one to miss, since it has no groups and its pool rounds hang off `groupStage` alone.
+ */
+export function findBracketMatch(bracket: Bracket, matchId: string): BracketMatch | null {
+  const rounds = [
+    ...bracket.winnerRounds,
+    ...bracket.loserRounds,
+    ...bracket.tiebreakerRounds,
+    ...bracket.groups.flatMap((group) => [...group.rounds, ...group.tiebreakerRounds]),
+    ...(bracket.groupStage?.rounds ?? []),
+  ];
+  for (const round of rounds) {
+    const found = round.matches.find((match) => match.id === matchId);
+    if (found) {
+      return found;
+    }
+  }
+
+  // The two matches that sit outside any round.
+  return [bracket.grandFinal, bracket.thirdPlace].find((match) => match?.id === matchId) ?? null;
+}

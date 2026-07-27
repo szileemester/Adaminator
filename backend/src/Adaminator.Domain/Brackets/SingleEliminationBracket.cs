@@ -60,7 +60,9 @@ public static class SingleEliminationBracket
         var pairings = ComputeRound1Pairings(ordered, size, requiredByes);
 
         var rounds = RoundCount(size);
-        var format = tournament.DefaultMatchFormat;
+        // The Third Place match is played alongside the Final but is not the deciding match, so it
+        // keeps the regular format rather than the Final's.
+        var format = tournament.PlayoffFormatFor(BracketSegment.Winner);
         var scoreType = tournament.DefaultScoreType;
         var matches = new List<Match>();
 
@@ -72,7 +74,8 @@ public static class SingleEliminationBracket
             var (a, b) = pairings[k];
             if (a is not null && b is not null)
             {
-                matches.Add(Match.Create(tournament.Id, BracketSegment.Winner, 1, k, a, b, format, scoreType));
+                matches.Add(Match.Create(
+                    tournament.Id, BracketSegment.Winner, 1, k, a, b, tournament.FormatForWinnerRound(1, rounds), scoreType));
                 continue;
             }
 
@@ -105,7 +108,8 @@ public static class SingleEliminationBracket
                     b = pre.Slot1;
                 }
 
-                matches.Add(Match.Create(tournament.Id, BracketSegment.Winner, r, m, a, b, format, scoreType));
+                matches.Add(Match.Create(
+                    tournament.Id, BracketSegment.Winner, r, m, a, b, tournament.FormatForWinnerRound(r, rounds), scoreType));
             }
         }
 

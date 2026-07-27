@@ -14,17 +14,26 @@ export function ParticipantLabel({
   name,
   emoji,
   sx,
+  pending = false,
 }: {
   name: string;
   emoji: string | null | undefined;
   sx?: SxProps<Theme>;
+  /**
+   * True for a slot no one has reached yet ("TBD"). The placeholder emoji means "this participant
+   * hasn't picked one", which is a claim about a participant - an empty slot has none, so it shows
+   * the label alone.
+   */
+  pending?: boolean;
 }) {
   return (
     // Spacing stays tight everywhere so the 168px bracket cards, the narrowest site, need no special case.
     <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', minWidth: 0 }}>
-      <Typography component="span" aria-hidden sx={{ fontSize: '1rem', lineHeight: 1, flexShrink: 0 }}>
-        {emoji ?? DEFAULT_PARTICIPANT_EMOJI}
-      </Typography>
+      {!pending && (
+        <Typography component="span" aria-hidden sx={{ fontSize: '1rem', lineHeight: 1, flexShrink: 0 }}>
+          {emoji ?? DEFAULT_PARTICIPANT_EMOJI}
+        </Typography>
+      )}
       <Typography variant="body2" noWrap sx={sx}>
         {name}
       </Typography>

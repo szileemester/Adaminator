@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { ComponentProps } from 'react';
 import {
   Alert,
@@ -17,6 +17,8 @@ import {
   Typography,
 } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import type {
   Bracket,
   BracketMatch,
@@ -27,7 +29,7 @@ import type {
   PlacementGroup,
   StandingRow,
 } from '../api/types';
-import { groupLabel } from '../api/types';
+import { findBracketMatch, groupLabel, isDecided, roundIsDecided } from '../api/types';
 import { ParticipantLabel } from './ParticipantLabel';
 import { MatchResultDialog } from './MatchResultDialog';
 
@@ -84,7 +86,7 @@ function PlaceCell({ rankStart, rankEnd }: { rankStart: number; rankEnd: number 
 
 const CARD_WIDTH = 168;
 const CARD_HEIGHT = 76;
-const ROUND_VGAP = 28;
+const ROUND_VGAP = 14; // vertical gap between two sibling cards in the same round
 const CONNECTOR_WIDTH = 32;
 const CONNECTOR_COLOR = 'rgba(255,255,255,0.2)';
 // Matches theme.ts's shape.borderRadius: the card Paper clips to this radius via overflow:
@@ -92,17 +94,59 @@ const CONNECTOR_COLOR = 'rgba(255,255,255,0.2)';
 // radius on its outer corners - otherwise the ring's sharp corner gets clipped mid-curve instead
 // of following the card's rounded edge.
 const CARD_RADIUS = 10;
-const EXTRA_MATCH_GAP = 32; // space between the last round's card and the extra match's label
+const EXTRA_MATCH_GAP = 20; // space between the last round's card and the extra match's label
 const LABEL_ROW_HEIGHT = 28; // reserved height for one subtitle2 label row (a round header, or the extra match's label)
-const SECTION_GAP = 48; // vertical space between the winner and loser bracket regions
+const SECTION_GAP = 32; // vertical space between the winner and loser bracket regions
 
-export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tournamentId?: string }) {
+/**
+ * A stage the admin just created matches in, so the view can jump to it. Carries an `at` stamp rather
+ * than being a bare stage name: generating a second tie-breaker wave has to re-fire the jump even
+ * though the stage is unchanged.
+ */
+export type FocusStage = { stage: 'groupStage' | 'tiebreakers' | 'playoffs'; at: number };
+
+/**
+ * Tabs are keyed by name, not by position: which ones exist varies by tournament type, so an index
+ * would mean something different per view and shift whenever a tab is added. A key is also exactly
+ * what {@link FocusStage} already carries, so jumping to a stage needs no mapping.
+ */
+type TabKey = FocusStage['stage'] | 'main' | 'leaderboard';
+
+export function BracketView({
+  bracket,
+  tournamentId,
+  focusStage,
+}: {
+  bracket: Bracket;
+  tournamentId?: string;
+  focusStage?: FocusStage | null;
+}) {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  // Defaults to the Leaderboard once the tournament is Finished, otherwise the Bracket - only at
-  // mount, so finishing the tournament while this is open doesn't yank the admin's current tab.
-  const [tab, setTab] = useState(() => (bracket.status === 'Finished' ? 1 : 0));
-  const selectedMatch = tournamentId && selectedMatchId ? findMatch(bracket, selectedMatchId) : null;
+  // Generated but not yet played. Distinct from bracket.needsTiebreakers, which means "a tie still
+  // needs matches generated" - the two gate different messages.
+  const tiebreakersPending = !bracket.tiebreakerRounds.every(roundIsDecided);
+  // Lands on whichever stage is actually live - only at mount, so playing a match while this is open
+  // never yanks the admin's current tab.
+  const [tab, setTab] = useState<TabKey>(() => {
+    if (bracket.status === 'Finished') {
+      return 'leaderboard';
+    }
+
+    // A Round Robin's tie-breakers are a stage between the schedule and the final standings, so an
+    // unresolved or unplayed tie is what the admin needs to see first.
+    const roundRobin = bracket.type === 'RoundRobin';
+    return roundRobin && (bracket.needsTiebreakers || tiebreakersPending) ? 'tiebreakers' : 'main';
+  });
+  // Generating a stage's matches jumps to it - the admin just asked for them, so show them. Must sit
+  // above the early returns below to stay an unconditional hook.
+  useEffect(() => {
+    if (focusStage?.stage === 'tiebreakers' && bracket.type === 'RoundRobin') {
+      setTab('tiebreakers');
+    }
+  }, [focusStage, bracket.type]);
+
+  const selectedMatch = tournamentId && selectedMatchId ? findBracketMatch(bracket, selectedMatchId) : null;
   const onSelect = tournamentId ? setSelectedMatchId : undefined;
 
   const dialog =
@@ -121,6 +165,7 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
         <GroupStagePlayoffView
           bracket={bracket}
           groupStage={bracket.groupStage}
+          focusStage={focusStage}
           onSelect={onSelect}
           hoveredId={hoveredId}
           onHover={setHoveredId}
@@ -142,12 +187,15 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
 
   return (
     <Box sx={{ pb: 1 }}>
-      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
-        <Tab label={isRoundRobin ? 'Schedule' : 'Bracket'} sx={{ minHeight: 36, py: 0 }} />
-        <Tab label="Leaderboard" sx={{ minHeight: 36, py: 0 }} />
+      {/* Round Robin gets a Tie-breakers tab of its own, like the Group Stage + Playoff view - they
+          are a real stage of play, not a footnote to the standings they resolve. */}
+      <Tabs value={tab} onChange={(_, value: TabKey) => setTab(value)} sx={{ mb: 2, minHeight: 36 }}>
+        <Tab value="main" label={isRoundRobin ? 'Schedule' : 'Bracket'} sx={{ minHeight: 36, py: 0 }} />
+        {isRoundRobin && <Tab value="tiebreakers" label="Tie-breakers" sx={{ minHeight: 36, py: 0 }} />}
+        <Tab value="leaderboard" label="Leaderboard" sx={{ minHeight: 36, py: 0 }} />
       </Tabs>
 
-      {tab === 0 ? (
+      {tab === 'main' && (
         <Box sx={{ overflowX: 'auto' }}>
           {bracket.type === 'DoubleElimination' ? (
             <PlayoffGrid bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
@@ -165,22 +213,62 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
             />
           )}
         </Box>
-      ) : isRoundRobin ? (
+      )}
+
+      {isRoundRobin && tab === 'tiebreakers' && (
         <Stack spacing={2} sx={{ alignItems: 'flex-start' }}>
-          <StandingsTable standings={bracket.standings} hoveredId={hoveredId} onHover={setHoveredId} />
+          {tiebreakersPending && (
+            <Alert severity="warning" sx={{ width: '100%' }}>
+              A standings tie needs to be played off. Enter these tie-breaker results to settle the final
+              order - the tournament cannot be finished until they are all decided.
+            </Alert>
+          )}
+          {bracket.needsTiebreakers && (
+            <Alert severity="warning" sx={{ width: '100%' }}>
+              A tie that decides a final position is unresolved. Use <strong>Resolve tie-breakers</strong>{' '}
+              above to generate the next round.
+            </Alert>
+          )}
+          {/*
+            The surprising part in practice is that these results stand on their own, so spell it out
+            rather than leaving an admin to reverse-engineer it from the standings.
+          */}
           {bracket.tiebreakerRounds.length > 0 && (
+            <Alert severity="info" sx={{ width: '100%' }}>
+              These are ranked on their own results: first by how many of these matches each player
+              wins, then - between players still level - by who beat whom here. A player can therefore
+              finish above someone who beat them in the main schedule.
+            </Alert>
+          )}
+          {bracket.tiebreakerRounds.length > 0 ? (
             <GroupMatchesTable
               rounds={bracket.tiebreakerRounds}
               onSelect={onSelect}
               hoveredId={hoveredId}
               onHover={setHoveredId}
-              title="Tie-breakers"
+              title="Tie-breaker matches"
             />
+          ) : (
+            !bracket.needsTiebreakers && (
+              <Typography color="text.secondary">
+                No tie-breakers were needed - the standings separated on their own.
+              </Typography>
+            )
           )}
         </Stack>
-      ) : (
-        <PlacementsList placements={bracket.placements} />
       )}
+
+      {/*
+        No hover on the final standings: every participant has exactly one row here, so there is
+        nothing to cross-reference and the highlight is just noise (the same reason PlacementsList
+        never had one).
+      */}
+      {tab === 'leaderboard' &&
+        (isRoundRobin ? (
+          <StandingsTable standings={bracket.standings} />
+        ) : (
+          <PlacementsList placements={bracket.placements} />
+        ))}
 
       {dialog}
     </Box>
@@ -379,12 +467,14 @@ function TiebreakerSection({
 function GroupStagePlayoffView({
   bracket,
   groupStage,
+  focusStage,
   onSelect,
   hoveredId,
   onHover,
 }: {
   bracket: Bracket;
   groupStage: GroupStage;
+  focusStage?: FocusStage | null;
   onSelect?: (matchId: string) => void;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
@@ -398,29 +488,37 @@ function GroupStagePlayoffView({
   const hasTiebreakers = tiebreakerGroups.length > 0 || crossGroupTiebreakers.length > 0;
   // Tie-breakers are a real stage between the group stage and the playoff, so land on whichever
   // stage is actually live: the playoff once started, otherwise a pending/played tie-break.
-  const [tab, setTab] = useState(() => {
-    if (bracket.status === 'Finished') return 3;
-    if (playoffStarted) return 2;
-    return hasTiebreakers || bracket.needsTiebreakers ? 1 : 0;
+  const [tab, setTab] = useState<TabKey>(() => {
+    if (bracket.status === 'Finished') return 'leaderboard';
+    if (playoffStarted) return 'playoffs';
+    return hasTiebreakers || bracket.needsTiebreakers ? 'tiebreakers' : 'groupStage';
   });
+
+  // Generating a stage's matches jumps to it - the admin just asked for them, so show them. The tab
+  // keys are the stage names, so this needs no mapping.
+  useEffect(() => {
+    if (focusStage) {
+      setTab(focusStage.stage);
+    }
+  }, [focusStage]);
 
   return (
     <Box sx={{ pb: 1 }}>
       <Tabs
         value={tab}
-        onChange={(_, value) => setTab(value)}
+        onChange={(_, value: TabKey) => setTab(value)}
         variant="scrollable"
         scrollButtons="auto"
         allowScrollButtonsMobile
         sx={{ mb: 2, minHeight: 36 }}
       >
-        <Tab label="Group Stage" sx={{ minHeight: 36, py: 0 }} />
-        <Tab label="Tie-breakers" sx={{ minHeight: 36, py: 0 }} />
-        <Tab label="Playoffs" sx={{ minHeight: 36, py: 0 }} />
-        <Tab label="Leaderboard" sx={{ minHeight: 36, py: 0 }} />
+        <Tab value="groupStage" label="Group Stage" sx={{ minHeight: 36, py: 0 }} />
+        <Tab value="tiebreakers" label="Tie-breakers" sx={{ minHeight: 36, py: 0 }} />
+        <Tab value="playoffs" label="Playoffs" sx={{ minHeight: 36, py: 0 }} />
+        <Tab value="leaderboard" label="Leaderboard" sx={{ minHeight: 36, py: 0 }} />
       </Tabs>
 
-      {tab === 0 && (
+      {tab === 'groupStage' && (
         isSwiss ? (
           <Stack spacing={1}>
             <Typography variant="subtitle2" color="text.secondary">
@@ -429,7 +527,13 @@ function GroupStagePlayoffView({
                 : 'Swiss pool'}
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'start' }}>
-              <GroupMatchesTable rounds={groupStage.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+              <GroupMatchesTable
+                rounds={groupStage.rounds}
+                onSelect={onSelect}
+                hoveredId={hoveredId}
+                onHover={onHover}
+                collapseDecidedRounds
+              />
               <StandingsTable standings={groupStage.standings} hoveredId={hoveredId} onHover={onHover} showsPlayoffDestination singleBracketPlayoff={playoffIsSingleElimination} />
             </Box>
           </Stack>
@@ -450,7 +554,7 @@ function GroupStagePlayoffView({
         )
       )}
 
-      {tab === 1 && (
+      {tab === 'tiebreakers' && (
         <Stack spacing={3}>
           {bracket.needsTiebreakers && (
             <Alert severity="warning">
@@ -489,7 +593,7 @@ function GroupStagePlayoffView({
         </Stack>
       )}
 
-      {tab === 2 &&
+      {tab === 'playoffs' &&
         (playoffStarted ? (
           <Box sx={{ overflowX: 'auto' }}>
             {playoffIsSingleElimination ? (
@@ -510,7 +614,7 @@ function GroupStagePlayoffView({
           </Typography>
         ))}
 
-      {tab === 3 && <PlacementsList placements={bracket.placements} />}
+      {tab === 'leaderboard' && <PlacementsList placements={bracket.placements} />}
     </Box>
   );
 }
@@ -580,18 +684,19 @@ function computeRoundWidths(rounds: BracketRound[], roundsAlwaysHalve: boolean):
 }
 
 /**
- * Vertical center (px) of every slot in every round, keyed by each match's own `indexInRound` rather
- * than its position within the round's match array - that array can be sparse (byes in round 1 never
- * get a Match row, so a lone real match can be e.g. index 3 of 4 while being the only entry), and
- * positioning by array position instead collapses distinct slots onto the same Y.
+ * Vertical center (px) of every match in every round, keyed by each match's own `indexInRound` rather
+ * than its position within the round's match array - that array can be sparse (a bye never gets a
+ * Match row, so a lone real match can be index 7 of 8 while being the round's only entry).
  *
- * Two passes. First the clean tree layout: round 1 evenly spaced across its full slot width, then
- * every later slot centered on the average of the slots feeding it (via {@link targetIndex}, which
- * handles both a halving round and a loser bracket's 1:1 drop-in round). Then, working backward from
- * the last round, any slot that is the *sole* real feeder of its target is leveled with that target -
- * so a lone feeder (its sibling being a bye that advanced with no Match row, or a drop-in round where
- * one feeder is a Winner Bracket dropout rather than a card) draws a straight connector instead of an
- * unnecessary vertical jog.
+ * Only real matches take vertical space. Laying out every *theoretical* slot instead leaves a roster
+ * that isn't a power of two mostly empty - a 9-player bracket reserves 8 round-1 rows to show one
+ * match - which both stretches the tree and turns its connectors into long vertical jogs.
+ *
+ * So: a match no real match feeds into is a "leaf" and takes the next row down, ordered by where it
+ * sits in the full bracket so the rows still read top-to-bottom. Every other match centers on the
+ * feeders it actually has, which leaves a lone feeder level with its target and its connector
+ * straight (its sibling being a bye, or - in a loser bracket's drop-in round - a Winner Bracket
+ * dropout that has no card here).
  */
 function computeTreeLayout(
   rounds: BracketRound[],
@@ -599,47 +704,59 @@ function computeTreeLayout(
 ): { positions: Map<number, number>[]; widths: number[]; totalHeight: number } {
   const widthMap = computeRoundWidths(rounds, roundsAlwaysHalve);
   const widths = rounds.map((round) => widthMap.get(round.round) ?? Math.max(1, occupiedWidth(round)));
+  const realSlots = rounds.map((round) => round.matches.map((m) => m.indexInRound).sort((a, b) => a - b));
 
-  const firstWidth = widths[0] ?? 0;
-  let slotY = Array.from({ length: firstWidth }, (_, i) => i * (CARD_HEIGHT + ROUND_VGAP) + CARD_HEIGHT / 2);
-  const roundY: number[][] = [slotY];
-
+  // Which real matches of the previous round feed each slot of this one.
+  const feedersOf = rounds.map(() => new Map<number, number[]>());
   for (let ri = 1; ri < rounds.length; ri++) {
-    const sums = new Array<number>(widths[ri]).fill(0);
-    const counts = new Array<number>(widths[ri]).fill(0);
-    slotY.forEach((y, slot) => {
+    for (const slot of realSlots[ri - 1]) {
       const target = targetIndex(widths[ri - 1], widths[ri], slot);
-      sums[target] += y;
-      counts[target] += 1;
-    });
-
-    slotY = sums.map((sum, j) => (counts[j] > 0 ? sum / counts[j] : CARD_HEIGHT / 2));
-    roundY.push(slotY);
-  }
-
-  const realSlots = rounds.map((round) => new Set(round.matches.map((m) => m.indexInRound)));
-  for (let ri = rounds.length - 2; ri >= 0; ri--) {
-    const feedersByTarget = new Map<number, number[]>();
-    for (const slot of realSlots[ri]) {
-      const target = targetIndex(widths[ri], widths[ri + 1], slot);
-      const feeders = feedersByTarget.get(target);
+      const feeders = feedersOf[ri].get(target);
       if (feeders) {
         feeders.push(slot);
       } else {
-        feedersByTarget.set(target, [slot]);
-      }
-    }
-
-    for (const [target, feeders] of feedersByTarget) {
-      if (feeders.length === 1 && roundY[ri + 1][target] !== undefined) {
-        roundY[ri][feeders[0]] = roundY[ri + 1][target];
+        feedersOf[ri].set(target, [slot]);
       }
     }
   }
 
-  const positions = roundY.map((slots) => new Map(slots.map((y, i) => [i, y])));
+  // A leaf's position in the full bracket, in first-round slot units, so leaves from different rounds
+  // still stack in bracket order (a round-2 match whose feeders were all byes sits among round 1's).
+  const firstWidth = widths[0] ?? 1;
+  const spanStart = (ri: number, slot: number) => slot * (firstWidth / (widths[ri] || 1));
 
-  const totalHeight = Math.max(firstWidth * (CARD_HEIGHT + ROUND_VGAP) - ROUND_VGAP, CARD_HEIGHT);
+  const leaves: { ri: number; slot: number }[] = [];
+  for (let ri = 0; ri < rounds.length; ri++) {
+    for (const slot of realSlots[ri]) {
+      if (ri === 0 || !feedersOf[ri].get(slot)?.length) {
+        leaves.push({ ri, slot });
+      }
+    }
+  }
+  leaves.sort((a, b) => spanStart(a.ri, a.slot) - spanStart(b.ri, b.slot) || a.ri - b.ri);
+
+  const positions: Map<number, number>[] = rounds.map(() => new Map<number, number>());
+  leaves.forEach(({ ri, slot }, row) => {
+    positions[ri].set(slot, row * (CARD_HEIGHT + ROUND_VGAP) + CARD_HEIGHT / 2);
+  });
+
+  // Rounds ascend, so a match's feeders are always already placed by the time it is.
+  for (let ri = 1; ri < rounds.length; ri++) {
+    for (const slot of realSlots[ri]) {
+      if (positions[ri].has(slot)) {
+        continue;
+      }
+
+      const ys = (feedersOf[ri].get(slot) ?? [])
+        .map((feeder) => positions[ri - 1].get(feeder))
+        .filter((y): y is number => y !== undefined);
+      if (ys.length > 0) {
+        positions[ri].set(slot, ys.reduce((sum, y) => sum + y, 0) / ys.length);
+      }
+    }
+  }
+
+  const totalHeight = Math.max(leaves.length * (CARD_HEIGHT + ROUND_VGAP) - ROUND_VGAP, CARD_HEIGHT);
   return { positions, widths, totalHeight };
 }
 
@@ -791,20 +908,6 @@ function RoundColumns({
   );
 }
 
-function findMatch(bracket: Bracket, matchId: string): BracketMatch | null {
-  const groupRounds = bracket.groups.flatMap((group) => [...group.rounds, ...group.tiebreakerRounds]);
-  for (const round of [...bracket.winnerRounds, ...bracket.loserRounds, ...bracket.tiebreakerRounds, ...groupRounds]) {
-    const found = round.matches.find((m) => m.id === matchId);
-    if (found) {
-      return found;
-    }
-  }
-  if (bracket.grandFinal?.id === matchId) {
-    return bracket.grandFinal;
-  }
-  return bracket.thirdPlace?.id === matchId ? bracket.thirdPlace : null;
-}
-
 /**
  * Winner/hover styling for one slot of a match, shared by the card view (`SlotRow`) and the group
  * matches table (`GroupMatchRow`) so the two stay in sync: `rowSx` goes on the container (winner
@@ -831,7 +934,7 @@ function slotHighlight(slot: BracketSlot | null, winnerId: string | null, hovere
  * more informative there. Null while the match isn't decided yet (nothing to show).
  */
 function displayScore(match: BracketMatch, isSlotA: boolean): number | null {
-  if (match.status !== 'Completed' && match.status !== 'Forfeit') {
+  if (!isDecided(match)) {
     return null;
   }
 
@@ -925,7 +1028,7 @@ function SlotRow({
         ...rowSx,
       }}
     >
-      <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} sx={textSx} />
+      <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} pending={!slot} sx={textSx} />
       {score != null && (
         <Box
           sx={{
@@ -952,13 +1055,25 @@ function GroupMatchesTable({
   hoveredId,
   onHover,
   title = 'Matches',
+  collapseDecidedRounds = false,
 }: {
   rounds: BracketRound[];
   onSelect?: (matchId: string) => void;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
   title?: string;
+  /**
+   * Fold a round away once every match in it is decided, so a stage that grows a round at a time
+   * (Swiss) keeps the round still being played in view instead of pushing it below the finished ones.
+   */
+  collapseDecidedRounds?: boolean;
 }) {
+  // Only explicit clicks are remembered; everything else follows the results, so a round generated
+  // later starts open and the one it supersedes folds itself away.
+  const [overrides, setOverrides] = useState<Record<number, boolean>>({});
+  const isOpen = (round: BracketRound) =>
+    overrides[round.round] ?? !(collapseDecidedRounds && roundIsDecided(round));
+
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2" color="text.secondary">
@@ -967,18 +1082,38 @@ function GroupMatchesTable({
       <TableContainer component={Paper} variant="outlined">
         <Table size="small">
           <TableBody>
-            {rounds.map((round) => (
-              <Fragment key={round.round}>
-                <TableRow>
-                  <TableCell colSpan={3} sx={{ bgcolor: 'action.hover', fontWeight: 600, py: 0.5 }}>
-                    {round.title}
-                  </TableCell>
-                </TableRow>
-                {round.matches.map((match) => (
-                  <GroupMatchRow key={match.id} match={match} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
-                ))}
-              </Fragment>
-            ))}
+            {rounds.map((round) => {
+              const open = isOpen(round);
+              return (
+                <Fragment key={round.round}>
+                  <TableRow
+                    onClick={
+                      collapseDecidedRounds
+                        ? () => setOverrides((prev) => ({ ...prev, [round.round]: !open }))
+                        : undefined
+                    }
+                    sx={{ cursor: collapseDecidedRounds ? 'pointer' : 'default' }}
+                  >
+                    <TableCell colSpan={3} sx={{ bgcolor: 'action.hover', fontWeight: 600, py: 0.5 }}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        {collapseDecidedRounds &&
+                          (open ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />)}
+                        <span>{round.title}</span>
+                        {collapseDecidedRounds && !open && (
+                          <Typography variant="caption" color="text.secondary">
+                            {round.matches.length} played
+                          </Typography>
+                        )}
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                  {open &&
+                    round.matches.map((match) => (
+                      <GroupMatchRow key={match.id} match={match} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+                    ))}
+                </Fragment>
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
@@ -998,7 +1133,7 @@ function GroupMatchRow({
   onHover: (participantId: string | null) => void;
 }) {
   const actionable = Boolean(onSelect) && match.participantA != null && match.participantB != null;
-  const isDecided = match.status === 'Completed' || match.status === 'Forfeit';
+  const decided = isDecided(match);
   // A Swiss bye: one participant, no opponent, already credited the win. There is no score to show
   // and nothing to enter, so it reads as a labelled sit-out rather than an empty fixture.
   const isBye = match.participantA != null && match.participantB == null;
@@ -1011,7 +1146,7 @@ function GroupMatchRow({
         onMouseLeave={slot ? () => onHover(null) : undefined}
         sx={rowSx}
       >
-        <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} sx={textSx} />
+        <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} pending={!slot} sx={textSx} />
       </TableCell>
     );
   };
@@ -1022,7 +1157,7 @@ function GroupMatchRow({
       <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
         {isBye ? (
           <Chip size="small" label="BYE" sx={{ fontWeight: 600, '& .MuiChip-label': { px: 1 } }} />
-        ) : isDecided ? (
+        ) : decided ? (
           <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'center', alignItems: 'center' }}>
             <Typography variant="body2" component="span">
               {match.aggregateScoreA} – {match.aggregateScoreB}
@@ -1056,8 +1191,13 @@ function StandingsTable({
   singleBracketPlayoff = false,
 }: {
   standings: StandingRow[];
-  hoveredId: string | null;
-  onHover: (participantId: string | null) => void;
+  /**
+   * Cross-referencing hover, for the places a participant appears more than once on screen - a group's
+   * standings beside its match table, say. Omit both on a final standings table, where every
+   * participant has exactly one row and there is nothing to cross-reference.
+   */
+  hoveredId?: string | null;
+  onHover?: (participantId: string | null) => void;
   /**
    * True for a Group Stage + Playoff group or Swiss pool: rows are colored and labeled by where the
    * position sends the participant, instead of the trophy-styled final rank the Leaderboard tab uses
@@ -1094,8 +1234,8 @@ function StandingsTable({
               return (
                 <TableRow
                   key={row.participantId}
-                  onMouseEnter={() => onHover(row.participantId)}
-                  onMouseLeave={() => onHover(null)}
+                  onMouseEnter={onHover && (() => onHover(row.participantId))}
+                  onMouseLeave={onHover && (() => onHover(null))}
                   sx={{
                     bgcolor: colors?.bg ?? 'transparent',
                     boxShadow: isHovered ? 'inset 0 0 0 2px rgba(124,156,255,0.8)' : 'none',

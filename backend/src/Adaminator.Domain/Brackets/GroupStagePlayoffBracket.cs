@@ -258,6 +258,8 @@ public static class GroupStagePlayoffBracket
     {
         var capacity = seeds.Count;
         var rounds = SingleEliminationBracket.RoundCount(capacity);
+        // The Third Place match is not the deciding match, so it keeps the regular playoff format
+        // rather than the Final's.
         var format = tournament.PlayoffFormatFor(BracketSegment.Winner);
         var scoreType = tournament.DefaultScoreType;
 
@@ -274,7 +276,7 @@ public static class GroupStagePlayoffBracket
                     index,
                     seeded ? seeds[2 * index] : null,
                     seeded ? seeds[2 * index + 1] : null,
-                    format,
+                    tournament.FormatForWinnerRound(round, rounds),
                     scoreType);
             }
         }

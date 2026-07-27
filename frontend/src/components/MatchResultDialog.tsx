@@ -14,7 +14,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { BracketMatch, ScoreType } from '../api/types';
-import { allowsDraw, formatParticipantName, matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
+import { allowsDraw, formatParticipantName, isDecided, matchFormatGameCount, matchFormatLabels, requiredWins, scoreTypeLabels } from '../api/types';
 import { completeMatch, forfeitMatch, saveMatchResult, undoMatch } from '../api/matches';
 import type { ScoreEntryInput } from '../api/matches';
 import { extractErrorMessage } from '../api/client';
@@ -95,7 +95,7 @@ interface MatchResultDialogProps {
 
 export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultDialogProps) {
   const queryClient = useQueryClient();
-  const isDecided = match.status === 'Completed' || match.status === 'Forfeit';
+  const decided = isDecided(match);
 
   // Fixed for the lifetime of the dialog: format and score type are set once when the bracket is
   // built (by the tournament's settings), never editable at result-entry time.
@@ -215,7 +215,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
             </Alert>
           )}
 
-          {isDecided ? (
+          {decided ? (
             <Stack spacing={1}>
               <Typography variant="body2" color="text.secondary">
                 {match.status === 'Forfeit' ? 'Completed by forfeit.' : 'Completed.'}
@@ -319,7 +319,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
         </Stack>
       </DialogContent>
       <DialogActions>
-        {isDecided ? (
+        {decided ? (
           <>
             <Button onClick={handleClose}>Close</Button>
             {match.canUndo && (

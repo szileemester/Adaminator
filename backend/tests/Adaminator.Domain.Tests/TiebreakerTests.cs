@@ -141,9 +141,10 @@ public class TiebreakerTests
     }
 
     [Fact]
-    public void A_tie_below_the_podium_does_not_block_finishing()
+    public void A_tie_below_the_podium_is_played_off_too()
     {
-        // P1/P2/P3 strictly ordered on the podium; P4/P5/P6 cycle for 4th-6th (below the podium cuts).
+        // P1/P2/P3 strictly ordered on the podium; P4/P5/P6 cycle for 4th-6th. A Round Robin ranks the
+        // whole field, so a cycle outside the podium is just as unsettled as one on it.
         var t = StartedRoundRobin(6, TiebreakerPolicy.ComputedThenMatch);
         foreach (var strong in new[] { "P1", "P2", "P3" })
         {
@@ -160,8 +161,15 @@ public class TiebreakerTests
         Win(t, "P5", "P6");
         Win(t, "P6", "P4");
 
-        t.NeedsTiebreakers.Should().BeFalse();
-        t.CanFinish.Should().BeTrue();
+        t.NeedsTiebreakers.Should().BeTrue();
+        t.CanFinish.Should().BeFalse();
+
+        t.StartTiebreakers();
+        // Only the tied three play off - the podium settled itself.
+        t.Matches.Where(m => m.Segment == BracketSegment.Tiebreaker)
+            .SelectMany(m => new[] { m.ParticipantAId!.Value, m.ParticipantBId!.Value })
+            .Distinct()
+            .Should().HaveCount(3);
     }
 
     // ---- Played tie-breaker stage (Round Robin) ----

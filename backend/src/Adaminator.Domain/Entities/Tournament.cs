@@ -101,7 +101,7 @@ public class Tournament
     /// <summary>Whether group standings rank by total games won (a Best-of-2 group stage) rather than match wins.</summary>
     public bool RanksGroupsByGamesWon => GroupStageMatchFormat == MatchFormat.Bo2;
 
-    /// <summary>The match format for a playoff segment - shared by <see cref="Brackets.DoubleEliminationBracket"/> and <see cref="Brackets.GroupStagePlayoffBracket"/>.</summary>
+    /// <summary>The match format for a playoff segment - shared by every bracket builder.</summary>
     internal MatchFormat PlayoffFormatFor(BracketSegment segment) => segment switch
     {
         BracketSegment.Winner => UpperBracketFormat,
@@ -109,6 +109,14 @@ public class Tournament
         BracketSegment.GrandFinal => GrandFinalFormat,
         _ => DefaultMatchFormat,
     };
+
+    /// <summary>
+    /// The match format for one match of a winner-side tree, whose last round is the deciding match and
+    /// may be played longer than the rest. The one place that rule lives, so every single-elimination
+    /// shape - standalone or a playoff - resolves it the same way.
+    /// </summary>
+    internal MatchFormat FormatForWinnerRound(int round, int lastRound) =>
+        round == lastRound ? GrandFinalFormat : PlayoffFormatFor(BracketSegment.Winner);
 
     public TournamentStatus Status { get; private set; }
 
@@ -760,9 +768,10 @@ public class Tournament
         }
         else
         {
-            // Round Robin: only podium (top-3) ties are played out.
-            var cuts = new[] { 1, 2, 3 };
-            foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(ScopeMatches(null), _participants, roster, TiebreakerPolicy, cuts))
+            // Round Robin ranks the whole field rather than just a podium, so there is no boundary to
+            // be inside of - every tie changes someone's final position.
+            foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(
+                ScopeMatches(null), _participants, roster, TiebreakerPolicy, boundaryCuts: null))
             {
                 result.Add((null, cohort));
             }
@@ -1164,15 +1173,21 @@ public class Tournament
         var resolvedGroupStageFormat = isGroupStagePlayoff ? groupStageMatchFormat ?? defaultMatchFormat : defaultMatchFormat;
         var resolvedUpperFormat = usesBracketFormats ? upperBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
         var resolvedLowerFormat = usesBracketFormats ? lowerBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
-        var resolvedGrandFinalFormat = usesBracketFormats ? grandFinalFormat ?? defaultMatchFormat : defaultMatchFormat;
 
-        // A single-elimination playoff has neither a Loser Bracket nor a Grand Final, so those two
-        // formats collapse onto the one bracket format - the same "collapse to the default when the
-        // segment doesn't exist" convention the non-bracket types use above.
+        // Every elimination shape ends on one deciding match that may be played longer than the rest -
+        // a Grand Final for the double-elimination shapes, a Final for the single-elimination ones - so
+        // GrandFinalFormat applies to all of them. Only Round Robin, which has no deciding match,
+        // collapses it onto the default.
+        var resolvedGrandFinalFormat = type == TournamentType.RoundRobin
+            ? defaultMatchFormat
+            : grandFinalFormat ?? defaultMatchFormat;
+
+        // A single-elimination playoff has no Loser Bracket, so that format collapses onto the one
+        // bracket format - the same "collapse to the default when the segment doesn't exist" convention
+        // the non-bracket types use above.
         if (isGroupStagePlayoff && playoffKind == PlayoffKind.SingleElimination)
         {
             resolvedLowerFormat = resolvedUpperFormat;
-            resolvedGrandFinalFormat = resolvedUpperFormat;
         }
 
         // Only the Group Stage format may allow draws (Best of 2) - every bracket match needs a winner.

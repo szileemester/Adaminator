@@ -85,7 +85,8 @@ public static class RoundRobinStandings
         IReadOnlyCollection<Participant> participants,
         IReadOnlyDictionary<Guid, Participant> roster,
         TiebreakerPolicy policy,
-        IReadOnlyCollection<int> boundaryCuts,
+        // Positions where crossing changes a participant's fate; null when every position does.
+        IReadOnlyCollection<int>? boundaryCuts,
         bool byGamesWon = false)
     {
         // AlwaysMatch deliberately ignores head-to-head/differential when deciding *whether* to play, so
@@ -288,8 +289,17 @@ public static class RoundRobinStandings
             .Select(g => g.ToList())
             .ToList();
 
-    private static bool Straddles(List<Guid> cohort, IReadOnlyDictionary<Guid, int> position, IReadOnlyCollection<int> boundaryCuts)
+    /// <summary>
+    /// Whether a cohort spans a boundary worth playing off. A null cut list means every position is a
+    /// boundary - a Round Robin ranks the whole field, so any tie at all matters.
+    /// </summary>
+    private static bool Straddles(List<Guid> cohort, IReadOnlyDictionary<Guid, int> position, IReadOnlyCollection<int>? boundaryCuts)
     {
+        if (boundaryCuts is null)
+        {
+            return true;
+        }
+
         var lo = cohort.Min(id => position[id]);
         var hi = cohort.Max(id => position[id]);
         return boundaryCuts.Any(cut => GroupStagePlayoffBracket.SpansCut(lo, hi, cut));

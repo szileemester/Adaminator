@@ -151,6 +151,8 @@ export function TournamentForm({
   });
 
   const selectedType = watch('type');
+  // Round Robin has no deciding match, so it is the one type with no Final to format separately.
+  const isRoundRobin = selectedType === 'RoundRobin';
   const selectedGroupStageKind = watch('groupStageKind');
   const selectedPlayoffKind = watch('playoffKind');
   const isGroupStagePlayoff = selectedType === 'GroupStagePlayoff';
@@ -186,13 +188,8 @@ export function TournamentForm({
 
   const submit = handleSubmit((values) => {
     // Segments a type doesn't have collapse onto the format it does use, so a hidden picker never
-    // posts a stale value: a bracket-less type falls back to its single match format, and a
-    // single-elimination playoff (no Loser Bracket, no Grand Final) reads its one bracket format.
-    const segmentFormat = !usesBracketFormats
-      ? values.defaultMatchFormat
-      : showsAllBracketFormats
-        ? null
-        : values.upperBracketFormat;
+    // posts a stale value.
+    const playoffFormat = usesBracketFormats ? values.upperBracketFormat : values.defaultMatchFormat;
     onSubmit({
       name: values.name.trim(),
       date: values.date,
@@ -208,9 +205,11 @@ export function TournamentForm({
       swissRounds: usesSwissPool ? values.swissRounds : 0,
       tiebreakerPolicy: values.tiebreakerPolicy,
       groupStageMatchFormat: isGroupStagePlayoff ? values.groupStageMatchFormat : values.defaultMatchFormat,
-      upperBracketFormat: usesBracketFormats ? values.upperBracketFormat : values.defaultMatchFormat,
-      lowerBracketFormat: segmentFormat ?? values.lowerBracketFormat,
-      grandFinalFormat: segmentFormat ?? values.grandFinalFormat,
+      upperBracketFormat: playoffFormat,
+      // A single-elimination playoff has no Loser Bracket, so that format collapses onto its one.
+      lowerBracketFormat: showsAllBracketFormats ? values.lowerBracketFormat : playoffFormat,
+      // Every type but Round Robin ends on a deciding match with its own format.
+      grandFinalFormat: isRoundRobin ? values.defaultMatchFormat : values.grandFinalFormat,
     });
   });
 
@@ -362,16 +361,28 @@ export function TournamentForm({
           />
         )}
 
+        {/* A single-elimination playoff has one bracket, so the same picker just changes its label. */}
         {usesBracketFormats && (
-          showsAllBracketFormats ? (
-            <>
-              <FormatPicker name="upperBracketFormat" label="Upper bracket format" control={control} options={decisiveFormats} />
-              <FormatPicker name="lowerBracketFormat" label="Lower bracket format" control={control} options={decisiveFormats} />
-              <FormatPicker name="grandFinalFormat" label="Grand Final format" control={control} options={decisiveFormats} />
-            </>
-          ) : (
-            <FormatPicker name="upperBracketFormat" label="Playoff match format" control={control} options={decisiveFormats} />
-          )
+          <FormatPicker
+            name="upperBracketFormat"
+            label={showsAllBracketFormats ? 'Upper bracket format' : 'Playoff match format'}
+            control={control}
+            options={decisiveFormats}
+          />
+        )}
+
+        {showsAllBracketFormats && (
+          <FormatPicker name="lowerBracketFormat" label="Lower bracket format" control={control} options={decisiveFormats} />
+        )}
+
+        {/* Every elimination shape ends on one deciding match that can be played longer than the rest. */}
+        {!isRoundRobin && (
+          <FormatPicker
+            name="grandFinalFormat"
+            label={showsAllBracketFormats ? 'Grand Final format' : 'Final format'}
+            control={control}
+            options={decisiveFormats}
+          />
         )}
 
         <Controller

@@ -59,17 +59,19 @@ export function PublicTournamentPage() {
               <Typography variant="h6" gutterBottom>
                 Participants ({data.participants.length})
               </Typography>
+              {/*
+                No bye marker here: a bye is a property of the bracket's first round, not of the
+                person, and the bracket below already shows who skipped it. On a roster that isn't a
+                power of two most entries carry one, which reads as a label on the participant.
+              */}
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {data.participants.map((participant) => {
-                  const label = formatParticipantName(participant.name, participant.emoji);
-                  return (
-                    <Chip
-                      key={participant.id}
-                      label={participant.hasBye ? `${label} · bye` : label}
-                      variant="outlined"
-                    />
-                  );
-                })}
+                {data.participants.map((participant) => (
+                  <Chip
+                    key={participant.id}
+                    label={formatParticipantName(participant.name, participant.emoji)}
+                    variant="outlined"
+                  />
+                ))}
               </Box>
             </CardContent>
           </Card>

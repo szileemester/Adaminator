@@ -8,6 +8,7 @@ import {
   Card,
   CardContent,
   CircularProgress,
+  Collapse,
   IconButton,
   Snackbar,
   Stack,
@@ -22,6 +23,8 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import FastForwardIcon from '@mui/icons-material/FastForward';
 import BalanceIcon from '@mui/icons-material/Balance';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import {
   deleteTournament,
   finishTournament,
@@ -45,6 +48,7 @@ import { ParticipantsSection } from '../components/ParticipantsSection';
 import { BracketPreview } from '../components/BracketPreview';
 import { GroupsPreview } from '../components/GroupsPreview';
 import { BracketView } from '../components/BracketView';
+import type { FocusStage } from '../components/BracketView';
 
 export function TournamentDetailPage() {
   const { id = '' } = useParams();
@@ -57,6 +61,9 @@ export function TournamentDetailPage() {
   const [confirmTiebreakersOpen, setConfirmTiebreakersOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Set when a bracket action creates a stage's matches, so the view below jumps to that tab.
+  const [focusStage, setFocusStage] = useState<FocusStage | null>(null);
+  const [overviewOpen, setOverviewOpen] = useState(false);
 
   const { data: tournament, isLoading, isError, error } = useQuery({
     queryKey: ['tournaments', id],
@@ -85,10 +92,20 @@ export function TournamentDetailPage() {
    * builds the shared options; the useMutation calls stay top-level so hook order never varies.
    * `alsoRefreshList` is for Finish, which also changes the status shown on the dashboard.
    */
-  const bracketAction = (action: () => Promise<unknown>, closeDialog: (open: boolean) => void, alsoRefreshList = false) => ({
+  const bracketAction = (
+    action: () => Promise<unknown>,
+    closeDialog: (open: boolean) => void,
+    alsoRefreshList = false,
+    /** The stage this action creates matches in, so the bracket view can jump to it. */
+    focuses?: FocusStage['stage'],
+  ) => ({
     mutationFn: action,
     onSuccess: async () => {
       closeDialog(false);
+      if (focuses) {
+        setFocusStage({ stage: focuses, at: Date.now() });
+      }
+
       await Promise.all([
         ...(alsoRefreshList ? [queryClient.invalidateQueries({ queryKey: ['tournaments'] })] : []),
         queryClient.invalidateQueries({ queryKey: ['tournaments', id] }),
@@ -102,9 +119,9 @@ export function TournamentDetailPage() {
   });
 
   const finishMutation = useMutation(bracketAction(() => finishTournament(id), setConfirmFinishOpen, true));
-  const startPlayoffsMutation = useMutation(bracketAction(() => startPlayoffs(id), setConfirmPlayoffsOpen));
-  const startTiebreakersMutation = useMutation(bracketAction(() => startTiebreakers(id), setConfirmTiebreakersOpen));
-  const startSwissRoundMutation = useMutation(bracketAction(() => startNextSwissRound(id), setConfirmSwissRoundOpen));
+  const startPlayoffsMutation = useMutation(bracketAction(() => startPlayoffs(id), setConfirmPlayoffsOpen, false, 'playoffs'));
+  const startTiebreakersMutation = useMutation(bracketAction(() => startTiebreakers(id), setConfirmTiebreakersOpen, false, 'tiebreakers'));
+  const startSwissRoundMutation = useMutation(bracketAction(() => startNextSwissRound(id), setConfirmSwissRoundOpen, false, 'groupStage'));
 
   if (isLoading) {
     return (
@@ -149,12 +166,33 @@ export function TournamentDetailPage() {
         </Stack>
       </Stack>
 
+      {/*
+        Collapsed by default: the settings here are fixed once the tournament starts, so they are
+        reference material - the bracket below is what the admin actually works in.
+      */}
       <Card>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Overview
-          </Typography>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, columnGap: 4, rowGap: 1.5 }}>
+          <Button
+            onClick={() => setOverviewOpen((open) => !open)}
+            endIcon={overviewOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            color="inherit"
+            aria-expanded={overviewOpen}
+            sx={{ p: 0, minWidth: 0, textTransform: 'none', '&:hover': { bgcolor: 'transparent' } }}
+          >
+            <Typography variant="h6">Overview</Typography>
+          </Button>
+          {/* unmountOnExit: collapsed is the default, so there is no reason to keep a dozen rows
+              mounted and re-rendering for content nobody has asked to see. */}
+          <Collapse in={overviewOpen} unmountOnExit>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                columnGap: 4,
+                rowGap: 1.5,
+                mt: 2,
+              }}
+            >
             <DetailRow label="Date" value={tournament.date} />
             <DetailRow label="Type" value={tournamentTypeLabels[tournament.type]} />
             {tournament.type === 'GroupStagePlayoff' && (
@@ -184,7 +222,8 @@ export function TournamentDetailPage() {
               value={tournament.notes?.trim() ? tournament.notes : '—'}
               sx={{ gridColumn: { xs: '1', sm: '1 / -1' } }}
             />
-          </Box>
+            </Box>
+          </Collapse>
         </CardContent>
       </Card>
 
@@ -260,7 +299,7 @@ export function TournamentDetailPage() {
             )}
 
             {bracket ? (
-              <BracketView bracket={bracket} tournamentId={tournament.id} />
+              <BracketView bracket={bracket} tournamentId={tournament.id} focusStage={focusStage} />
             ) : (
               <CircularProgress size={24} />
             )}

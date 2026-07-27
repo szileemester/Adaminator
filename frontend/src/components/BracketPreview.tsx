@@ -42,6 +42,39 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
   const seeded = participants.length >= 2 && participants.every((p) => p.seed > 0);
   const required = requiredByes(participants.length, tournamentType);
   const isRoundRobin = tournamentType === 'RoundRobin';
+  // Byes only exist when the roster has to be padded to fill the bracket. A Round Robin or a Group
+  // Stage + Playoff never pads, and neither does a roster that is already a power of two - in all of
+  // those cases exactly zero byes may be chosen, so offering the control at all is a dead end.
+  const showsByes = required > 0;
+
+  // What this preview is actually for, decided once. Only a Swiss group stage reaches this component -
+  // round-robin groups get GroupsPreview instead.
+  const shape = isRoundRobin
+    ? 'roundRobin'
+    : tournamentType === 'GroupStagePlayoff'
+      ? 'swissPool'
+      : showsByes
+        ? 'bracketWithByes'
+        : 'exactBracket';
+  const copy = {
+    roundRobin: {
+      generate: 'Generate a schedule order for the round robin.',
+      reorder: 'Reorder the schedule order. Every participant plays every other participant once.',
+    },
+    swissPool: {
+      generate: 'Generate a starting order for the Swiss pool.',
+      reorder:
+        'Reorder the pool. Round 1 pairs adjacent entries; every round after that pairs on results. An odd roster sits one player out per round automatically.',
+    },
+    bracketWithByes: {
+      generate: 'Generate a bracket to seed participants randomly and choose bye recipients.',
+      reorder: `Reorder seeds and select exactly ${required} bye recipient${required === 1 ? '' : 's'}. Bye recipients skip the first round.`,
+    },
+    exactBracket: {
+      generate: 'Generate a bracket to seed participants randomly.',
+      reorder: 'Reorder seeds. The roster fills the bracket exactly, so nobody needs a bye.',
+    },
+  }[shape];
 
   // Mirror server state into local editable state whenever there are no unsaved edits.
   useEffect(() => {
@@ -115,7 +148,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
       <CardContent>
         <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6">Bracket preview</Typography>
-          {seeded && !isRoundRobin && (
+          {seeded && showsByes && (
             <Chip
               size="small"
               color={byesValid ? 'success' : 'warning'}
@@ -133,9 +166,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
         {!seeded ? (
           <Stack spacing={2} sx={{ alignItems: 'flex-start' }}>
             <Typography variant="body2" color="text.secondary">
-              {isRoundRobin
-                ? 'Generate a schedule order for the round robin.'
-                : 'Generate a bracket to seed participants randomly and choose bye recipients.'}
+              {copy.generate}
             </Typography>
             <Button
               variant="contained"
@@ -149,9 +180,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
         ) : (
           <Stack spacing={2}>
             <Typography variant="body2" color="text.secondary">
-              {isRoundRobin
-                ? 'Reorder the schedule order. Every participant plays every other participant once.'
-                : `Reorder seeds and select exactly ${required} bye recipient${required === 1 ? '' : 's'}. Bye recipients skip the first round.`}
+              {copy.reorder}
             </Typography>
 
             <List dense>
@@ -161,7 +190,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
                   disableGutters
                   secondaryAction={
                     <Stack direction="row" sx={{ alignItems: 'center' }}>
-                      {!isRoundRobin && (
+                      {showsByes && (
                         <Tooltip title="Give a first-round bye">
                           <Checkbox
                             edge="end"
@@ -224,7 +253,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
                 You have unsaved changes. Save the preview before starting.
               </Typography>
             )}
-            {!byesValid && (
+            {showsByes && !byesValid && (
               <Typography variant="body2" color="warning.main">
                 Select exactly {required} bye recipient{required === 1 ? '' : 's'}.
               </Typography>
