@@ -45,7 +45,11 @@ public class TournamentService
             request.GroupStageMatchFormat,
             request.UpperBracketFormat,
             request.LowerBracketFormat,
-            request.GrandFinalFormat);
+            request.GrandFinalFormat,
+            request.GroupStageKind,
+            request.PlayoffKind,
+            request.PlayoffSize,
+            request.SwissRounds);
 
         await _repository.AddAsync(tournament, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -73,7 +77,11 @@ public class TournamentService
             request.GroupStageMatchFormat,
             request.UpperBracketFormat,
             request.LowerBracketFormat,
-            request.GrandFinalFormat);
+            request.GrandFinalFormat,
+            request.GroupStageKind,
+            request.PlayoffKind,
+            request.PlayoffSize,
+            request.SwissRounds);
 
         await _repository.SaveChangesAsync(cancellationToken);
 

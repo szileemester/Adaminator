@@ -17,7 +17,16 @@ import {
   Typography,
 } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
-import type { Bracket, BracketMatch, BracketRound, BracketSlot, PlacementGroup, StandingRow } from '../api/types';
+import type {
+  Bracket,
+  BracketMatch,
+  BracketRound,
+  BracketSlot,
+  GroupStage,
+  LevelOutcome,
+  PlacementGroup,
+  StandingRow,
+} from '../api/types';
 import { groupLabel } from '../api/types';
 import { ParticipantLabel } from './ParticipantLabel';
 import { MatchResultDialog } from './MatchResultDialog';
@@ -28,10 +37,17 @@ const RANK_COLORS: Record<number, { trophy: string; bg: string }> = {
   3: { trophy: '#CD7F32', bg: 'rgba(205,127,50,0.15)' },
 };
 
-/** A group standing's projected playoff destination: the top half of the group advances to the Upper Bracket, the bottom half to the Lower Bracket - nobody is eliminated at the group stage. */
-const BRACKET_TIER_COLORS = {
-  upper: { text: '#3fb950', bg: 'rgba(63,185,80,0.15)' },
-  lower: { text: '#ffa726', bg: 'rgba(255,167,38,0.15)' },
+/**
+ * Where a group/Swiss standing sends a participant, as classified by the server from the playoff's
+ * shape and cut. A double-elimination playoff splits its qualifiers across two brackets; a single
+ * elimination one has just the one, so "Upper" is simply "in". "Contested" means equally-placed
+ * participants are still competing for the last slots either side of a cut.
+ */
+const PLAYOFF_DESTINATIONS: Record<LevelOutcome, { label: string; text: string; bg: string }> = {
+  Upper: { label: 'Upper Bracket', text: '#3fb950', bg: 'rgba(63,185,80,0.15)' },
+  Lower: { label: 'Lower Bracket', text: '#ffa726', bg: 'rgba(255,167,38,0.15)' },
+  Contested: { label: 'Contested', text: '#7c9cff', bg: 'rgba(124,156,255,0.15)' },
+  Eliminated: { label: 'Eliminated', text: '#8b949e', bg: 'rgba(139,148,158,0.15)' },
 };
 
 function formatOrdinal(n: number): string {
@@ -99,10 +115,16 @@ export function BracketView({ bracket, tournamentId }: { bracket: Bracket; tourn
       />
     ) : null;
 
-  if (bracket.type === 'GroupStagePlayoff') {
+  if (bracket.type === 'GroupStagePlayoff' && bracket.groupStage) {
     return (
       <>
-        <GroupStagePlayoffView bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={setHoveredId} />
+        <GroupStagePlayoffView
+          bracket={bracket}
+          groupStage={bracket.groupStage}
+          onSelect={onSelect}
+          hoveredId={hoveredId}
+          onHover={setHoveredId}
+        />
         {dialog}
       </>
     );
@@ -356,16 +378,20 @@ function TiebreakerSection({
 /** Group Stage + Playoff: Group Stage, its own Tie-breakers stage, Playoffs, and Leaderboard. */
 function GroupStagePlayoffView({
   bracket,
+  groupStage,
   onSelect,
   hoveredId,
   onHover,
 }: {
   bracket: Bracket;
+  groupStage: GroupStage;
   onSelect?: (matchId: string) => void;
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
 }) {
   const playoffStarted = bracket.winnerRounds.length > 0;
+  const isSwiss = groupStage.kind === 'Swiss';
+  const playoffIsSingleElimination = groupStage.playoffKind === 'SingleElimination';
   const tiebreakerGroups = bracket.groups.filter((group) => group.tiebreakerRounds.length > 0);
   // Deciders played *between* groups, when equally-placed players contest the last playoff slots.
   const crossGroupTiebreakers = bracket.tiebreakerRounds;
@@ -395,26 +421,40 @@ function GroupStagePlayoffView({
       </Tabs>
 
       {tab === 0 && (
-        <Stack spacing={4}>
-          {bracket.groups.map((group) => (
-            <Stack key={group.groupIndex} spacing={1}>
-              <Typography variant="subtitle2" color="text.secondary">
-                {groupLabel(group.groupIndex)}
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'start' }}>
-                <GroupMatchesTable rounds={group.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
-                <StandingsTable standings={group.standings} hoveredId={hoveredId} onHover={onHover} bracketSplit />
-              </Box>
-            </Stack>
-          ))}
-        </Stack>
+        isSwiss ? (
+          <Stack spacing={1}>
+            <Typography variant="subtitle2" color="text.secondary">
+              {groupStage.roundsPlayed > 0
+                ? `Swiss pool - round ${groupStage.roundsPlayed} of ${groupStage.roundsTotal}`
+                : 'Swiss pool'}
+            </Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'start' }}>
+              <GroupMatchesTable rounds={groupStage.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+              <StandingsTable standings={groupStage.standings} hoveredId={hoveredId} onHover={onHover} showsPlayoffDestination singleBracketPlayoff={playoffIsSingleElimination} />
+            </Box>
+          </Stack>
+        ) : (
+          <Stack spacing={4}>
+            {bracket.groups.map((group) => (
+              <Stack key={group.groupIndex} spacing={1}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  {groupLabel(group.groupIndex)}
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'start' }}>
+                  <GroupMatchesTable rounds={group.rounds} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+                  <StandingsTable standings={group.standings} hoveredId={hoveredId} onHover={onHover} showsPlayoffDestination singleBracketPlayoff={playoffIsSingleElimination} />
+                </Box>
+              </Stack>
+            ))}
+          </Stack>
+        )
       )}
 
       {tab === 1 && (
         <Stack spacing={3}>
           {bracket.needsTiebreakers && (
             <Alert severity="warning">
-              A tie that decides the Upper/Lower split is unresolved. Use <strong>Resolve tie-breakers</strong> above to
+              A tie that decides who reaches the playoff is unresolved. Use <strong>Resolve tie-breakers</strong> above to
               generate the next round - the playoff stays locked until it is settled.
             </Alert>
           )}
@@ -452,7 +492,17 @@ function GroupStagePlayoffView({
       {tab === 2 &&
         (playoffStarted ? (
           <Box sx={{ overflowX: 'auto' }}>
-            <PlayoffGrid bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+            {playoffIsSingleElimination ? (
+              <BracketTree
+                rounds={bracket.winnerRounds}
+                onSelect={onSelect}
+                hoveredId={hoveredId}
+                onHover={onHover}
+                extraMatch={bracket.thirdPlace ? { label: 'Third Place Match', match: bracket.thirdPlace } : null}
+              />
+            ) : (
+              <PlayoffGrid bracket={bracket} onSelect={onSelect} hoveredId={hoveredId} onHover={onHover} />
+            )}
           </Box>
         ) : (
           <Typography color="text.secondary">
@@ -949,6 +999,9 @@ function GroupMatchRow({
 }) {
   const actionable = Boolean(onSelect) && match.participantA != null && match.participantB != null;
   const isDecided = match.status === 'Completed' || match.status === 'Forfeit';
+  // A Swiss bye: one participant, no opponent, already credited the win. There is no score to show
+  // and nothing to enter, so it reads as a labelled sit-out rather than an empty fixture.
+  const isBye = match.participantA != null && match.participantB == null;
 
   const nameCell = (slot: BracketSlot | null) => {
     const { rowSx, textSx } = slotHighlight(slot, match.winnerId, hoveredId);
@@ -967,7 +1020,9 @@ function GroupMatchRow({
     <TableRow onClick={actionable ? () => onSelect!(match.id) : undefined} sx={{ cursor: actionable ? 'pointer' : 'default' }}>
       {nameCell(match.participantA)}
       <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
-        {isDecided ? (
+        {isBye ? (
+          <Chip size="small" label="BYE" sx={{ fontWeight: 600, '& .MuiChip-label': { px: 1 } }} />
+        ) : isDecided ? (
           <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'center', alignItems: 'center' }}>
             <Typography variant="body2" component="span">
               {match.aggregateScoreA} – {match.aggregateScoreB}
@@ -980,7 +1035,15 @@ function GroupMatchRow({
           </Typography>
         )}
       </TableCell>
-      {nameCell(match.participantB)}
+      {isBye ? (
+        <TableCell>
+          <Typography variant="body2" color="text.secondary">
+            sat out - win credited
+          </Typography>
+        </TableCell>
+      ) : (
+        nameCell(match.participantB)
+      )}
     </TableRow>
   );
 }
@@ -989,20 +1052,22 @@ function StandingsTable({
   standings,
   hoveredId,
   onHover,
-  bracketSplit = false,
+  showsPlayoffDestination = false,
+  singleBracketPlayoff = false,
 }: {
   standings: StandingRow[];
   hoveredId: string | null;
   onHover: (participantId: string | null) => void;
   /**
-   * True for a Group Stage + Playoff group: rows are colored and labeled by playoff destination
-   * (top half -> Upper Bracket, bottom half -> Lower Bracket) instead of the trophy-styled final
-   * rank the Leaderboard tab uses - a group's rank 1 isn't a tournament placement.
+   * True for a Group Stage + Playoff group or Swiss pool: rows are colored and labeled by where the
+   * position sends the participant, instead of the trophy-styled final rank the Leaderboard tab uses
+   * - a group's rank 1 isn't a tournament placement. The destination comes from the server, which
+   * knows the playoff's shape and cut; the table never derives it.
    */
-  bracketSplit?: boolean;
+  showsPlayoffDestination?: boolean;
+  /** A single-elimination playoff has one bracket, so its qualifiers are simply "Qualified". */
+  singleBracketPlayoff?: boolean;
 }) {
-  const upperCount = Math.floor(standings.length / 2);
-
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2" color="text.secondary">
@@ -1021,9 +1086,10 @@ function StandingsTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {standings.map((row, index) => {
-              const tier = index < upperCount ? BRACKET_TIER_COLORS.upper : BRACKET_TIER_COLORS.lower;
-              const colors = bracketSplit ? tier : RANK_COLORS[row.rank];
+            {standings.map((row) => {
+              const destination = row.playoffDestination;
+              const tier = destination ? PLAYOFF_DESTINATIONS[destination] : null;
+              const colors = showsPlayoffDestination ? tier : RANK_COLORS[row.rank];
               const isHovered = row.participantId === hoveredId;
               return (
                 <TableRow
@@ -1036,19 +1102,21 @@ function StandingsTable({
                   }}
                 >
                   <TableCell>
-                    {bracketSplit ? (
+                    {showsPlayoffDestination ? (
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                         <Typography variant="body2">{row.rank}</Typography>
-                        <Chip
-                          size="small"
-                          label={index < upperCount ? 'Upper Bracket' : 'Lower Bracket'}
-                          sx={{
-                            color: tier.text,
-                            bgcolor: tier.bg,
-                            fontWeight: 600,
-                            '& .MuiChip-label': { px: 1 },
-                          }}
-                        />
+                        {tier && (
+                          <Chip
+                            size="small"
+                            label={singleBracketPlayoff && destination === 'Upper' ? 'Qualified' : tier.label}
+                            sx={{
+                              color: tier.text,
+                              bgcolor: tier.bg,
+                              fontWeight: 600,
+                              '& .MuiChip-label': { px: 1 },
+                            }}
+                          />
+                        )}
                       </Stack>
                     ) : (
                       <PlaceCell rankStart={row.rank} rankEnd={row.rank} />

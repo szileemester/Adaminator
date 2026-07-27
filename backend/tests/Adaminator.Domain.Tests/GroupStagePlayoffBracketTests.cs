@@ -53,9 +53,9 @@ public class GroupStagePlayoffBracketTests
     [InlineData(15, 8)]
     [InlineData(16, 16)]
     [InlineData(31, 16)]
-    public void PlayoffCapacity_is_the_largest_power_of_two_the_roster_fills(int participants, int expected)
+    public void LargestCapacityFor_is_the_largest_power_of_two_the_roster_fills(int participants, int expected)
     {
-        GroupStagePlayoffBracket.PlayoffCapacity(participants).Should().Be(expected);
+        GroupStagePlayoffBracket.LargestCapacityFor(participants).Should().Be(expected);
     }
 
     [Theory]
@@ -72,7 +72,7 @@ public class GroupStagePlayoffBracketTests
     [Fact]
     public void Levels_for_an_exact_power_of_two_are_a_clean_split_with_no_contest()
     {
-        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 4, 4 }, capacity: 8);
+        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 4, 4 }, capacity: 8, PlayoffKind.DoubleElimination);
 
         levels.Select(l => l.Outcome).Should()
             .Equal(LevelOutcome.Upper, LevelOutcome.Upper, LevelOutcome.Lower, LevelOutcome.Lower);
@@ -82,7 +82,7 @@ public class GroupStagePlayoffBracketTests
     public void Levels_for_nine_players_in_two_groups_eliminate_only_the_odd_one_out()
     {
         // Groups of 5 and 4: eight advance (top four of each), the 5th-placed player is out.
-        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 5, 4 }, capacity: 8);
+        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 5, 4 }, capacity: 8, PlayoffKind.DoubleElimination);
 
         levels.Select(l => l.Outcome).Should()
             .Equal(LevelOutcome.Upper, LevelOutcome.Upper, LevelOutcome.Lower, LevelOutcome.Lower, LevelOutcome.Eliminated);
@@ -94,7 +94,7 @@ public class GroupStagePlayoffBracketTests
     {
         // 12 players in 3 groups: 8 advance, so the runners-up contest the Upper/Lower line and the
         // third-placed players contest the last playoff slots.
-        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 4, 4, 4 }, capacity: 8);
+        var levels = GroupStagePlayoffBracket.PlanLevels(new[] { 4, 4, 4 }, capacity: 8, PlayoffKind.DoubleElimination);
 
         levels.Select(l => l.Outcome).Should()
             .Equal(LevelOutcome.Upper, LevelOutcome.Contested, LevelOutcome.Contested, LevelOutcome.Eliminated);
@@ -107,7 +107,7 @@ public class GroupStagePlayoffBracketTests
     {
         var ids = NewIds(9);
 
-        var (upper, lower, eliminated) = GroupStagePlayoffBracket.SeedPools(ids, capacity: 8);
+        var (upper, lower, eliminated) = GroupStagePlayoffBracket.SeedPools(ids, capacity: 8, PlayoffKind.DoubleElimination);
 
         upper.Should().Equal(ids.Take(4));
         lower.Should().Equal(ids.Skip(4).Take(4));

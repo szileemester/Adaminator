@@ -24,7 +24,21 @@ public record BracketMatchDto(
 public record BracketRoundDto(int Round, string Title, IReadOnlyList<BracketMatchDto> Matches);
 
 /// <summary>A participant's ranked group/round-robin record. <c>GamesWon</c> is the primary key for a Best-of-2 group; otherwise match wins are.</summary>
-public record StandingRowDto(int Rank, Guid ParticipantId, string Name, string? Emoji, int Played, int Wins, int Losses, int GamesWon);
+public record StandingRowDto(
+    int Rank,
+    Guid ParticipantId,
+    string Name,
+    string? Emoji,
+    int Played,
+    int Wins,
+    int Losses,
+    int GamesWon,
+    /// <summary>
+    /// Group Stage + Playoff only: where finishing in this position sends a participant. Known from the
+    /// playoff cut alone, before any result, so the display never has to re-derive the split itself.
+    /// Null for a plain Round Robin, which has no playoff to qualify for.
+    /// </summary>
+    LevelOutcome? PlayoffDestination = null);
 
 /// <summary>
 /// Single/Double Elimination only: one rung of the final-placements leaderboard - "Champion",
@@ -42,6 +56,22 @@ public record GroupDto(
     IReadOnlyList<StandingRowDto> Standings,
     IReadOnlyList<BracketRoundDto> TiebreakerRounds);
 
+/// <summary>
+/// Group Stage + Playoff only: which of the four variants is being played, plus - for a Swiss group
+/// stage, whose single pool has no <see cref="GroupDto"/> to hang them on - the pool's own schedule,
+/// standings and round progress.
+/// </summary>
+public record GroupStageDto(
+    GroupStageKind Kind,
+    PlayoffKind PlayoffKind,
+    /// <summary>Swiss only: the single pool's round-by-round schedule. Empty for round-robin groups, which carry theirs per group.</summary>
+    IReadOnlyList<BracketRoundDto> Rounds,
+    /// <summary>Swiss only: the single pool's standings. Empty for round-robin groups.</summary>
+    IReadOnlyList<StandingRowDto> Standings,
+    int RoundsPlayed,
+    int RoundsTotal,
+    bool CanStartNextRound);
+
 public record BracketDto(
     TournamentType Type,
     TournamentStatus Status,
@@ -57,4 +87,6 @@ public record BracketDto(
     IReadOnlyList<BracketRoundDto> TiebreakerRounds,
     bool NeedsTiebreakers,
     bool CanStartPlayoffs,
-    bool CanFinish);
+    bool CanFinish,
+    /// <summary>Group Stage + Playoff only; null for every other type.</summary>
+    GroupStageDto? GroupStage = null);

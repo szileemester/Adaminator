@@ -22,9 +22,23 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import FastForwardIcon from '@mui/icons-material/FastForward';
 import BalanceIcon from '@mui/icons-material/Balance';
-import { deleteTournament, finishTournament, getBracket, getTournament, startPlayoffs, startTiebreakers } from '../api/tournaments';
+import {
+  deleteTournament,
+  finishTournament,
+  getBracket,
+  getTournament,
+  startNextSwissRound,
+  startPlayoffs,
+  startTiebreakers,
+} from '../api/tournaments';
 import { extractErrorMessage } from '../api/client';
-import { matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
+import {
+  groupStageKindLabels,
+  matchFormatLabels,
+  playoffKindLabels,
+  scoreTypeLabels,
+  tournamentTypeLabels,
+} from '../api/types';
 import { StatusChip } from '../components/StatusChip';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ParticipantsSection } from '../components/ParticipantsSection';
@@ -39,6 +53,7 @@ export function TournamentDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmFinishOpen, setConfirmFinishOpen] = useState(false);
   const [confirmPlayoffsOpen, setConfirmPlayoffsOpen] = useState(false);
+  const [confirmSwissRoundOpen, setConfirmSwissRoundOpen] = useState(false);
   const [confirmTiebreakersOpen, setConfirmTiebreakersOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -89,6 +104,7 @@ export function TournamentDetailPage() {
   const finishMutation = useMutation(bracketAction(() => finishTournament(id), setConfirmFinishOpen, true));
   const startPlayoffsMutation = useMutation(bracketAction(() => startPlayoffs(id), setConfirmPlayoffsOpen));
   const startTiebreakersMutation = useMutation(bracketAction(() => startTiebreakers(id), setConfirmTiebreakersOpen));
+  const startSwissRoundMutation = useMutation(bracketAction(() => startNextSwissRound(id), setConfirmSwissRoundOpen));
 
   if (isLoading) {
     return (
@@ -142,7 +158,23 @@ export function TournamentDetailPage() {
             <DetailRow label="Date" value={tournament.date} />
             <DetailRow label="Type" value={tournamentTypeLabels[tournament.type]} />
             {tournament.type === 'GroupStagePlayoff' && (
-              <DetailRow label="Groups" value={String(tournament.groupCount)} />
+              <>
+                <DetailRow label="Group stage" value={groupStageKindLabels[tournament.groupStageKind]} />
+                <DetailRow label="Playoff" value={playoffKindLabels[tournament.playoffKind]} />
+                {tournament.groupStageKind === 'RoundRobin' ? (
+                  <DetailRow label="Groups" value={String(tournament.groupCount)} />
+                ) : (
+                  <DetailRow label="Swiss rounds" value={String(tournament.resolvedSwissRounds)} />
+                )}
+                <DetailRow
+                  label="Playoff size"
+                  value={
+                    tournament.playoffSize > 0
+                      ? String(tournament.playoffSize)
+                      : `${tournament.playoffCapacity} (auto)`
+                  }
+                />
+              </>
             )}
             <DetailRow label="Default match format" value={matchFormatLabels[tournament.defaultMatchFormat]} />
             <DetailRow label="Default score type" value={scoreTypeLabels[tournament.defaultScoreType]} />
@@ -159,7 +191,11 @@ export function TournamentDetailPage() {
       {tournament.status === 'Planned' ? (
         <>
           <ParticipantsSection tournamentId={tournament.id} tournamentType={tournament.type} />
-          {tournament.type === 'GroupStagePlayoff' ? (
+          {/*
+            A Swiss group stage has no draw - round 1 is paired from the seed order, so it uses the
+            same bracket preview every non-group type does.
+          */}
+          {tournament.type === 'GroupStagePlayoff' && tournament.groupStageKind === 'RoundRobin' ? (
             <GroupsPreview tournamentId={tournament.id} groupCount={tournament.groupCount} />
           ) : (
             <BracketPreview tournamentId={tournament.id} tournamentType={tournament.type} />
@@ -181,6 +217,16 @@ export function TournamentDetailPage() {
                       onClick={() => setConfirmTiebreakersOpen(true)}
                     >
                       Resolve tie-breakers
+                    </Button>
+                  )}
+                  {bracket?.groupStage?.canStartNextRound && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<FastForwardIcon />}
+                      onClick={() => setConfirmSwissRoundOpen(true)}
+                    >
+                      Start round {bracket.groupStage.roundsPlayed + 1}
                     </Button>
                   )}
                   {bracket?.canStartPlayoffs && (
@@ -273,6 +319,16 @@ export function TournamentDetailPage() {
         busy={startPlayoffsMutation.isPending}
         onCancel={() => setConfirmPlayoffsOpen(false)}
         onConfirm={() => startPlayoffsMutation.mutate()}
+      />
+
+      <ConfirmDialog
+        open={confirmSwissRoundOpen}
+        title="Start the next Swiss round"
+        message="This pairs the next round from the current standings - participants on a similar record meet, and nobody plays the same opponent twice. Results already entered stay editable until the round after this one is paired."
+        confirmLabel="Pair round"
+        busy={startSwissRoundMutation.isPending}
+        onCancel={() => setConfirmSwissRoundOpen(false)}
+        onConfirm={() => startSwissRoundMutation.mutate()}
       />
 
       <ConfirmDialog

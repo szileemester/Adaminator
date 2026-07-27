@@ -82,8 +82,8 @@ export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: stri
         ) : (
           <Stack spacing={2}>
             <Typography variant="body2" color="text.secondary">
-              Each group plays a round robin. The top half of each group advances to the Winner Bracket and the bottom half
-              to the Loser Bracket of the playoff.
+              Each group plays a round robin, then the standings seed the playoff - group winners first, then runners-up,
+              and so on. Each standings table shows where its positions land once the tournament starts.
             </Typography>
 
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>

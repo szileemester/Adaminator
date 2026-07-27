@@ -63,6 +63,14 @@ public class BracketController : ControllerBase
         return Ok(tournament);
     }
 
+    /// <summary>Swiss group stage: pair the next round from the current standings.</summary>
+    [HttpPost("start-swiss-round")]
+    public async Task<ActionResult<TournamentDto>> StartNextSwissRound(Guid tournamentId, CancellationToken cancellationToken)
+    {
+        var tournament = await _service.StartNextSwissRoundAsync(tournamentId, cancellationToken);
+        return Ok(tournament);
+    }
+
     /// <summary>Round Robin and Group Stage + Playoff: generate the played tie-breaker matches needed to resolve standings ties.</summary>
     [HttpPost("start-tiebreakers")]
     public async Task<ActionResult<TournamentDto>> StartTiebreakers(Guid tournamentId, CancellationToken cancellationToken)

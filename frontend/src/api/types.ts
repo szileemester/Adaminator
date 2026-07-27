@@ -4,6 +4,12 @@ export type MatchFormat = 'Bo1' | 'Bo2' | 'Bo3' | 'Bo5' | 'Bo7';
 export type TournamentStatus = 'Planned' | 'Running' | 'Finished';
 /** How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff. */
 export type TiebreakerPolicy = 'ComputedThenMatch' | 'AlwaysMatch';
+/** Group Stage + Playoff only: how the group stage is played before the playoff is seeded. */
+export type GroupStageKind = 'RoundRobin' | 'Swiss';
+/** Group Stage + Playoff only: the playoff's elimination structure. */
+export type PlayoffKind = 'DoubleElimination' | 'SingleElimination';
+/** Where finishing in a given standings position sends a participant. */
+export type LevelOutcome = 'Upper' | 'Lower' | 'Contested' | 'Eliminated';
 
 export interface TournamentSummary {
   id: string;
@@ -24,8 +30,20 @@ export interface Tournament {
   defaultMatchFormat: MatchFormat;
   thirdPlaceEnabled: boolean;
   defaultScoreType: ScoreType;
-  /** Group Stage + Playoff only: number of groups; 0 for other types. */
+  /** Group Stage + Playoff with round-robin groups: number of groups; 0 for Swiss and other types. */
   groupCount: number;
+  /** Group Stage + Playoff only: how the group stage is played. */
+  groupStageKind: GroupStageKind;
+  /** Group Stage + Playoff only: the playoff's structure. */
+  playoffKind: PlayoffKind;
+  /** Group Stage + Playoff only: the admin's raw choice; 0 means "the largest capacity the roster fills". */
+  playoffSize: number;
+  /** Group Stage + Playoff with a Swiss group stage: the admin's raw choice; 0 means ceil(log2 roster). */
+  swissRounds: number;
+  /** The playoff cut actually in force, with 0 resolved against the current roster. */
+  playoffCapacity: number;
+  /** The Swiss round count actually in force, with 0 resolved against the current roster. */
+  resolvedSwissRounds: number;
   /** Round Robin + Group Stage + Playoff: how standings ties are resolved. */
   tiebreakerPolicy: TiebreakerPolicy;
   /** Group Stage + Playoff only: how group matches are played and scored - any format, including Bo2 (draws, ranked by games won). */
@@ -104,6 +122,12 @@ export interface StandingRow {
   losses: number;
   /** Total games won - the primary ranking key for a Best-of-2 group. */
   gamesWon: number;
+  /**
+   * Group Stage + Playoff only: where finishing in this position sends the participant. Computed from
+   * the playoff cut on the server, so the table never has to guess the split itself. Null for a plain
+   * Round Robin, which has no playoff to qualify for.
+   */
+  playoffDestination: LevelOutcome | null;
 }
 
 /** Single/Double Elimination only: one rung of the final-placements leaderboard; more than one participant means a tie. */
@@ -121,6 +145,23 @@ export interface Group {
   standings: StandingRow[];
   /** Played tie-breaker matches for this group; empty unless a straddling tie needed resolving. */
   tiebreakerRounds: BracketRound[];
+}
+
+/**
+ * Group Stage + Playoff only: which variant is being played, plus - for a Swiss group stage, whose
+ * single pool has no `Group` to hang them on - the pool's own schedule, standings and round progress.
+ */
+export interface GroupStage {
+  kind: GroupStageKind;
+  playoffKind: PlayoffKind;
+  /** Swiss only: the single pool's round-by-round schedule. Empty for round-robin groups. */
+  rounds: BracketRound[];
+  /** Swiss only: the single pool's standings. Empty for round-robin groups. */
+  standings: StandingRow[];
+  roundsPlayed: number;
+  /** Swiss only: how many rounds the pool plays in total; 0 for round-robin groups. */
+  roundsTotal: number;
+  canStartNextRound: boolean;
 }
 
 export interface Bracket {
@@ -150,6 +191,8 @@ export interface Bracket {
   canStartPlayoffs: boolean;
   /** True once every deciding match is decided and the admin can finish the tournament by hand. */
   canFinish: boolean;
+  /** Group Stage + Playoff only; null for every other type. */
+  groupStage: GroupStage | null;
 }
 
 export interface PublicTournament {
@@ -169,6 +212,10 @@ export interface PublicTournament {
   lowerBracketFormat: MatchFormat;
   /** Double Elimination + Group Stage + Playoff only: the Grand Final's match format. */
   grandFinalFormat: MatchFormat;
+  groupStageKind: GroupStageKind;
+  playoffKind: PlayoffKind;
+  playoffCapacity: number;
+  resolvedSwissRounds: number;
   status: TournamentStatus;
   participants: Participant[];
   bracket: Bracket | null;
@@ -212,7 +259,26 @@ export interface TournamentInput {
   upperBracketFormat: MatchFormat;
   lowerBracketFormat: MatchFormat;
   grandFinalFormat: MatchFormat;
+  groupStageKind: GroupStageKind;
+  playoffKind: PlayoffKind;
+  /** 0 means "the largest capacity the roster fills". */
+  playoffSize: number;
+  /** 0 means ceil(log2 roster). */
+  swissRounds: number;
 }
+
+export const groupStageKindLabels: Record<GroupStageKind, string> = {
+  RoundRobin: 'Round Robin groups',
+  Swiss: 'Swiss (single pool)',
+};
+
+export const playoffKindLabels: Record<PlayoffKind, string> = {
+  DoubleElimination: 'Double Elimination',
+  SingleElimination: 'Single Elimination',
+};
+
+/** The playoff cuts an admin may choose, plus 0 for "the largest that fits the roster". */
+export const playoffSizes = [0, 4, 8, 16, 32] as const;
 
 export const tournamentTypeLabels: Record<TournamentType, string> = {
   SingleElimination: 'Single Elimination',

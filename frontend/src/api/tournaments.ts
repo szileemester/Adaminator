@@ -101,6 +101,11 @@ export async function startPlayoffs(tournamentId: string): Promise<Tournament> {
   return data;
 }
 
+export async function startNextSwissRound(tournamentId: string): Promise<Tournament> {
+  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/start-swiss-round`);
+  return data;
+}
+
 export async function startTiebreakers(tournamentId: string): Promise<Tournament> {
   const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/start-tiebreakers`);
   return data;

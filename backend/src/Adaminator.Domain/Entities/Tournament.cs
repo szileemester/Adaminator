@@ -15,6 +15,9 @@ public class Tournament
     public const int MinParticipants = 2;
     public const int MaxParticipants = 32;
 
+    /// <summary>The most Swiss rounds an admin may schedule - a full round robin over the largest roster.</summary>
+    public const int MaxSwissRounds = MaxParticipants - 1;
+
     private readonly List<Participant> _participants = new();
     private readonly List<Match> _matches = new();
 
@@ -31,11 +34,50 @@ public class Tournament
     public MatchFormat DefaultMatchFormat { get; private set; }
     public ScoreType DefaultScoreType { get; private set; }
 
-    /// <summary>Third Place Match is only ever enabled for Single Elimination (BR-006, FR-TOUR-007/008).</summary>
+    /// <summary>Third Place Match is only ever enabled for a single-elimination bracket - a standalone Single Elimination tournament, or a Group Stage + Playoff whose playoff is single elimination (BR-006, FR-TOUR-007/008).</summary>
     public bool ThirdPlaceEnabled { get; private set; }
 
-    /// <summary>Group Stage + Playoff only: how many groups the roster is drawn into. 0 for every other type.</summary>
+    /// <summary>Group Stage + Playoff with round-robin groups: how many groups the roster is drawn into. 0 for a Swiss group stage and for every other type.</summary>
     public int GroupCount { get; private set; }
+
+    /// <summary>Group Stage + Playoff only: how the group stage is played. Ignored by every other type.</summary>
+    public GroupStageKind GroupStageKind { get; private set; }
+
+    /// <summary>Group Stage + Playoff only: the playoff's elimination structure. Ignored by every other type.</summary>
+    public PlayoffKind PlayoffKind { get; private set; }
+
+    /// <summary>
+    /// Group Stage + Playoff only: the admin-chosen playoff cut, or 0 for "the largest capacity the
+    /// roster fills". Kept as the raw choice so an untouched tournament keeps tracking its roster.
+    /// </summary>
+    public int PlayoffSize { get; private set; }
+
+    /// <summary>Group Stage + Playoff with a Swiss group stage: the admin-chosen round count, or 0 for the ceil(log2 n) default.</summary>
+    public int SwissRounds { get; private set; }
+
+    /// <summary>Group Stage + Playoff: how many participants actually reach the playoff.</summary>
+    public int PlayoffCapacity =>
+        PlayoffSize > 0 ? PlayoffSize : GroupStagePlayoffBracket.LargestCapacityFor(_participants.Count);
+
+    /// <summary>Group Stage + Playoff with a Swiss group stage: how many rounds it actually plays.</summary>
+    public int ResolvedSwissRounds =>
+        SwissRounds > 0 ? SwissRounds : SwissBracket.DefaultRounds(_participants.Count);
+
+    /// <summary>Whether this is a Group Stage + Playoff whose group stage is one Swiss pool rather than drawn groups.</summary>
+    public bool UsesSwissGroupStage => Type == TournamentType.GroupStagePlayoff && GroupStageKind == GroupStageKind.Swiss;
+
+    /// <summary>
+    /// How many admin-chosen first-round byes this tournament's shape needs. The one definition, shared
+    /// by seeding and by bracket-preview generation. Group Stage + Playoff never has one: its groups are
+    /// drawn, a Swiss pool sits a player out per round, and its playoff is always a clean power of two.
+    /// </summary>
+    public int RequiredByes => Type switch
+    {
+        TournamentType.DoubleElimination => DoubleEliminationBracket.ComputeRequiredByes(_participants.Count),
+        TournamentType.RoundRobin => RoundRobinBracket.ComputeRequiredByes(_participants.Count),
+        TournamentType.GroupStagePlayoff => 0,
+        _ => SingleEliminationBracket.ComputeRequiredByes(_participants.Count)
+    };
 
     /// <summary>How standings ties that change an outcome are resolved. Meaningful only for Round Robin and Group Stage + Playoff.</summary>
     public TiebreakerPolicy TiebreakerPolicy { get; private set; }
@@ -98,7 +140,11 @@ public class Tournament
         MatchFormat? groupStageMatchFormat = null,
         MatchFormat? upperBracketFormat = null,
         MatchFormat? lowerBracketFormat = null,
-        MatchFormat? grandFinalFormat = null)
+        MatchFormat? grandFinalFormat = null,
+        GroupStageKind groupStageKind = GroupStageKind.RoundRobin,
+        PlayoffKind playoffKind = PlayoffKind.DoubleElimination,
+        int playoffSize = 0,
+        int swissRounds = 0)
     {
         var tournament = new Tournament
         {
@@ -110,7 +156,8 @@ public class Tournament
 
         tournament.SetDetails(
             name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy,
-            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat);
+            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat,
+            groupStageKind, playoffKind, playoffSize, swissRounds);
         return tournament;
     }
 
@@ -128,12 +175,17 @@ public class Tournament
         MatchFormat? groupStageMatchFormat = null,
         MatchFormat? upperBracketFormat = null,
         MatchFormat? lowerBracketFormat = null,
-        MatchFormat? grandFinalFormat = null)
+        MatchFormat? grandFinalFormat = null,
+        GroupStageKind groupStageKind = GroupStageKind.RoundRobin,
+        PlayoffKind playoffKind = PlayoffKind.DoubleElimination,
+        int playoffSize = 0,
+        int swissRounds = 0)
     {
         EnsurePlanned("edited");
         SetDetails(
             name, date, notes, type, defaultMatchFormat, defaultScoreType, thirdPlaceEnabled, groupCount, tiebreakerPolicy,
-            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat);
+            groupStageMatchFormat, upperBracketFormat, lowerBracketFormat, grandFinalFormat,
+            groupStageKind, playoffKind, playoffSize, swissRounds);
     }
 
     // ---- Participant management (Planned only) ----
@@ -212,12 +264,7 @@ public class Tournament
             throw new DomainException("Bye selection is invalid.");
         }
 
-        var requiredByes = Type switch
-        {
-            TournamentType.DoubleElimination => DoubleEliminationBracket.ComputeRequiredByes(_participants.Count),
-            TournamentType.RoundRobin => RoundRobinBracket.ComputeRequiredByes(_participants.Count),
-            _ => SingleEliminationBracket.ComputeRequiredByes(_participants.Count)
-        };
+        var requiredByes = RequiredByes;
         if (byeSet.Count != requiredByes)
         {
             throw new DomainException($"Exactly {requiredByes} bye(s) must be selected; {byeSet.Count} chosen.");
@@ -243,6 +290,11 @@ public class Tournament
             throw new DomainException("Group draw is only available for Group Stage + Playoff tournaments.");
         }
 
+        if (UsesSwissGroupStage)
+        {
+            throw new DomainException("A Swiss group stage is one single pool - there are no groups to draw.");
+        }
+
         GroupStagePlayoffBracket.ValidateShape(_participants.Count, GroupCount);
 
         // Group sizes need not be equal - a remainder simply makes the earlier groups one bigger.
@@ -259,7 +311,7 @@ public class Tournament
     }
 
     /// <summary>Group Stage + Playoff: how many participants each group actually holds (sizes can differ by one).</summary>
-    private IReadOnlyList<int> CurrentGroupSizes() =>
+    public IReadOnlyList<int> CurrentGroupSizes() =>
         Enumerable.Range(0, GroupCount).Select(g => _participants.Count(p => p.GroupIndex == g)).ToList();
 
     // ---- Start (Planned -> Running) ----
@@ -272,7 +324,19 @@ public class Tournament
             throw new DomainException($"A tournament needs between {MinParticipants} and {MaxParticipants} participants to start.");
         }
 
-        if (Type == TournamentType.GroupStagePlayoff)
+        if (UsesSwissGroupStage)
+        {
+            // A Swiss pool has no draw; round 1 is paired from the seed order, so it needs the same
+            // generated bracket preview every non-group type does.
+            if (!IsSeeded)
+            {
+                throw new DomainException("Generate the pairing order before starting the tournament.");
+            }
+
+            SwissBracket.ValidateShape(_participants.Count, ResolvedSwissRounds);
+            GroupStagePlayoffBracket.ValidatePlayoffCapacity(_participants.Count, PlayoffCapacity);
+        }
+        else if (Type == TournamentType.GroupStagePlayoff)
         {
             if (_participants.Any(p => p.GroupIndex is null))
             {
@@ -280,6 +344,7 @@ public class Tournament
             }
 
             GroupStagePlayoffBracket.ValidateShape(_participants.Count, GroupCount);
+            GroupStagePlayoffBracket.ValidatePlayoffCapacity(_participants.Count, PlayoffCapacity);
         }
         else if (!IsSeeded)
         {
@@ -287,11 +352,14 @@ public class Tournament
         }
 
         // BuildMatches re-validates the bye count against the bracket size. Group Stage + Playoff
-        // starts with only the group stage; the playoff is built later by StartPlayoffs().
+        // starts with only the group stage - the playoff is built later by StartPlayoffs() - and a Swiss
+        // group stage starts with only round 1, since later pairings depend on results.
         var matches = Type switch
         {
             TournamentType.DoubleElimination => DoubleEliminationBracket.BuildMatches(this),
             TournamentType.RoundRobin => RoundRobinBracket.BuildMatches(this),
+            TournamentType.GroupStagePlayoff when UsesSwissGroupStage =>
+                SwissBracket.BuildRound(this, 1, _participants.OrderBy(p => p.Seed).Select(p => p.Id).ToList()),
             TournamentType.GroupStagePlayoff => GroupStagePlayoffBracket.BuildGroupStage(this),
             _ => SingleEliminationBracket.BuildMatches(this)
         };
@@ -394,15 +462,77 @@ public class Tournament
             throw new DomainException("Every tie-breaker match must be decided before starting the playoff.");
         }
 
-        var capacity = GroupStagePlayoffBracket.PlayoffCapacity(_participants.Count);
-        var (upperSeeds, lowerSeeds, _) = GroupStagePlayoffBracket.SeedPools(BuildSeedOrder(capacity), capacity);
+        var capacity = PlayoffCapacity;
+        GroupStagePlayoffBracket.ValidatePlayoffCapacity(_participants.Count, capacity);
+        var (upperSeeds, lowerSeeds, _) = GroupStagePlayoffBracket.SeedPools(BuildSeedOrder(capacity), capacity, PlayoffKind);
         _matches.AddRange(GroupStagePlayoffBracket.BuildPlayoff(this, upperSeeds, lowerSeeds));
     }
+
+    /// <summary>
+    /// Swiss group stage only: true once every match of the current round is decided and another round
+    /// is still due. Swiss pairings depend on results, so rounds are created one at a time.
+    /// </summary>
+    public bool CanStartNextSwissRound
+    {
+        get
+        {
+            if (!UsesSwissGroupStage || Status != TournamentStatus.Running)
+            {
+                return false;
+            }
+
+            var paired = SwissRoundsPaired;
+            return paired > 0 && paired < ResolvedSwissRounds && GroupStageMatches.All(IsDecided);
+        }
+    }
+
+    /// <summary>
+    /// Swiss group stage only: pairs and appends the next round from the current standings. A deliberate
+    /// admin action gated on <see cref="CanStartNextSwissRound"/>, mirroring <see cref="StartPlayoffs"/>.
+    /// </summary>
+    public void StartNextSwissRound()
+    {
+        if (!UsesSwissGroupStage)
+        {
+            throw new DomainException("Swiss rounds are only available for a Swiss group stage.");
+        }
+
+        if (Status != TournamentStatus.Running)
+        {
+            throw new DomainException("A Swiss round can only be started while the tournament is Running.");
+        }
+
+        if (SwissRoundsPaired >= ResolvedSwissRounds)
+        {
+            throw new DomainException("Every Swiss round has already been paired.");
+        }
+
+        if (!GroupStageMatches.All(IsDecided))
+        {
+            throw new DomainException("Every match of the current round must be decided before pairing the next one.");
+        }
+
+        var standings = RoundRobinStandings
+            .Rank(ScopeMatches(null), _participants, RosterById(), RanksGroupsByGamesWon)
+            .Select(row => row.ParticipantId)
+            .ToList();
+
+        _matches.AddRange(SwissBracket.BuildRound(this, SwissRoundsPaired + 1, standings));
+    }
+
+    /// <summary>The group-stage (or Swiss) matches - flat, unrouted, and the input to the standings.</summary>
+    private IEnumerable<Match> GroupStageMatches => _matches.Where(m => m.Segment == BracketSegment.RoundRobin);
+
+    /// <summary>Swiss group stage: how many rounds have actually been paired so far.</summary>
+    private int SwissRoundsPaired => GroupStageMatches.Select(m => m.Round).DefaultIfEmpty(0).Max();
+
+    /// <summary>The roster keyed by id, as the standings ranker needs it for its name-order backstop.</summary>
+    private Dictionary<Guid, Participant> RosterById() => _participants.ToDictionary(p => p.Id);
 
     /// <summary>Each group's final standings, best to worst.</summary>
     private List<IReadOnlyList<Guid>> GroupStandings()
     {
-        var roster = _participants.ToDictionary(p => p.Id);
+        var roster = RosterById();
         var standings = new List<IReadOnlyList<Guid>>(GroupCount);
         for (var g = 0; g < GroupCount; g++)
         {
@@ -420,8 +550,18 @@ public class Tournament
     /// </summary>
     private List<Guid> BuildSeedOrder(int capacity)
     {
+        // A Swiss pool is one flat standings table - there are no groups to interleave, so its order is
+        // the seeding order and the top `capacity` qualify.
+        if (UsesSwissGroupStage)
+        {
+            return RoundRobinStandings
+                .Rank(ScopeMatches(null), _participants, RosterById(), RanksGroupsByGamesWon)
+                .Select(row => row.ParticipantId)
+                .ToList();
+        }
+
         var standings = GroupStandings();
-        var levels = GroupStagePlayoffBracket.PlanLevels(CurrentGroupSizes(), capacity);
+        var levels = GroupStagePlayoffBracket.PlanLevels(CurrentGroupSizes(), capacity, PlayoffKind);
 
         var order = new List<Guid>(_participants.Count);
         foreach (var level in levels)
@@ -452,7 +592,7 @@ public class Tournament
             }
 
             // Cut positions expressed relative to this level's own span.
-            var localCuts = new[] { capacity / 2, capacity }
+            var localCuts = GroupStagePlayoffBracket.SeedCuts(capacity, PlayoffKind)
                 .Where(cut => GroupStagePlayoffBracket.SpansCut(level.Start, level.End, cut))
                 .Select(cut => cut - level.Start)
                 .ToList();
@@ -478,7 +618,7 @@ public class Tournament
     private List<Guid> OrderByCrossGroupDecider(List<Guid> members)
     {
         var wins = CrossGroupWins(members);
-        var roster = _participants.ToDictionary(p => p.Id);
+        var roster = RosterById();
         return members
             .OrderByDescending(id => wins[id])
             .ThenBy(id => roster[id].Name, StringComparer.OrdinalIgnoreCase)
@@ -580,14 +720,25 @@ public class Tournament
     /// <summary>The tied cohorts (with their group, null for Round Robin) that need played tie-breaker matches under the current policy.</summary>
     private List<(int? GroupIndex, IReadOnlyList<Guid> Members)> UnresolvedTieCohorts()
     {
-        var roster = _participants.ToDictionary(p => p.Id);
+        var roster = RosterById();
         var result = new List<(int?, IReadOnlyList<Guid>)>();
 
-        if (Type == TournamentType.GroupStagePlayoff)
+        if (UsesSwissGroupStage)
         {
-            var capacity = GroupStagePlayoffBracket.PlayoffCapacity(_participants.Count);
+            // One flat pool: the only placements worth playing off are the ones that straddle a playoff
+            // cut, which is the same rule the groups use - just over the whole field at once.
+            var cuts = GroupStagePlayoffBracket.SeedCuts(PlayoffCapacity, PlayoffKind);
+            foreach (var cohort in RoundRobinStandings.FindUnresolvedTieCohorts(
+                ScopeMatches(null), _participants, roster, TiebreakerPolicy, cuts, RanksGroupsByGamesWon))
+            {
+                result.Add((null, cohort));
+            }
+        }
+        else if (Type == TournamentType.GroupStagePlayoff)
+        {
+            var capacity = PlayoffCapacity;
             var sizes = CurrentGroupSizes();
-            var levels = GroupStagePlayoffBracket.PlanLevels(sizes, capacity);
+            var levels = GroupStagePlayoffBracket.PlanLevels(sizes, capacity, PlayoffKind);
 
             // A group placement only needs playing off when finishing one place lower would change the
             // participant's fate (Winner Bracket, Loser Bracket, eliminated, or into a contested level).
@@ -641,7 +792,9 @@ public class Tournament
                 any = true;
             }
 
-            return any;
+            // A Swiss pool is only done once every scheduled round has actually been paired - the rounds
+            // played so far being decided just means the next one can be paired.
+            return any && (!UsesSwissGroupStage || SwissRoundsPaired >= ResolvedSwissRounds);
         }
     }
 
@@ -657,6 +810,16 @@ public class Tournament
     /// </summary>
     private bool UsesStoredRoutes => Type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff;
 
+    /// <summary>
+    /// Whether the bracket that decides this tournament converges on a Grand Final - a Double
+    /// Elimination, or a Group Stage + Playoff whose playoff is double elimination. The
+    /// single-elimination shapes finish on their Final instead, and report third place from a real
+    /// Third Place match rather than deriving it from the Loser Bracket Final.
+    /// </summary>
+    private bool DecidedByGrandFinal =>
+        Type == TournamentType.DoubleElimination
+        || (Type == TournamentType.GroupStagePlayoff && PlayoffKind == PlayoffKind.DoubleElimination);
+
     /// <summary>A flat, unrouted match with no dependents - a Round Robin/group-stage match or a tie-breaker match. It never advances anyone and its undo needs only the latest-decided check.</summary>
     private static bool IsFlatSegment(BracketSegment segment) => segment is BracketSegment.RoundRobin or BracketSegment.Tiebreaker;
 
@@ -669,13 +832,15 @@ public class Tournament
     {
         get
         {
-            if (Type is not (TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff))
+            // Only a Grand-Final-shaped bracket derives third place from its Loser Bracket Final; every
+            // other shape either has a real Third Place match or no third place at all.
+            if (!DecidedByGrandFinal)
             {
                 return null;
             }
 
             var capacity = Type == TournamentType.GroupStagePlayoff
-                ? GroupStagePlayoffBracket.PlayoffCapacity(_participants.Count)
+                ? PlayoffCapacity
                 : DoubleEliminationBracket.ComputeBracketSize(_participants.Count);
             var finalRound = DoubleEliminationBracket.LoserRoundCount(capacity);
             var loserFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.Loser && m.Round == finalRound);
@@ -837,12 +1002,18 @@ public class Tournament
     /// <summary>Whether the Final (and, if enabled, Third Place) - or the Grand Final, or every match for Round Robin - is decided.</summary>
     private bool IsReadyToFinish()
     {
-        // Double Elimination and the Group Stage + Playoff playoff both finish on their Grand Final;
-        // for the latter that match only exists once the playoff has been started.
-        if (Type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff)
+        // For a Group Stage + Playoff the Grand Final only exists once the playoff has been started.
+        // A single-elimination playoff falls through to the Final (+ Third Place) check below.
+        if (DecidedByGrandFinal)
         {
             var grandFinal = _matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
             return grandFinal is not null && IsDecided(grandFinal);
+        }
+
+        // The playoff hasn't been built yet, so there is no Final to decide.
+        if (Type == TournamentType.GroupStagePlayoff && !PlayoffStarted)
+        {
+            return false;
         }
 
         if (Type == TournamentType.RoundRobin)
@@ -861,7 +1032,14 @@ public class Tournament
         return thirdPlace is null || IsDecided(thirdPlace);
     }
 
-    private int TotalRounds() => SingleEliminationBracket.RoundCount(SingleEliminationBracket.ComputeBracketSize(_participants.Count));
+    /// <summary>
+    /// Rounds in the winner-side elimination tree. A Group Stage + Playoff's tree is sized by the
+    /// playoff cut, not the roster - only the qualifiers ever play in it.
+    /// </summary>
+    private int TotalRounds() => SingleEliminationBracket.RoundCount(
+        Type == TournamentType.GroupStagePlayoff
+            ? PlayoffCapacity
+            : SingleEliminationBracket.ComputeBracketSize(_participants.Count));
 
     private bool IsLatestDecided(Match match)
     {
@@ -945,7 +1123,11 @@ public class Tournament
         MatchFormat? groupStageMatchFormat,
         MatchFormat? upperBracketFormat,
         MatchFormat? lowerBracketFormat,
-        MatchFormat? grandFinalFormat)
+        MatchFormat? grandFinalFormat,
+        GroupStageKind groupStageKind,
+        PlayoffKind playoffKind,
+        int playoffSize,
+        int swissRounds)
     {
         name = (name ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(name))
@@ -964,9 +1146,14 @@ public class Tournament
             throw new DomainException($"Tournament notes must be at most {NotesMaxLength} characters.");
         }
 
-        if (type != TournamentType.SingleElimination && thirdPlaceEnabled)
+        var isGroupStagePlayoff = type == TournamentType.GroupStagePlayoff;
+        var usesSwiss = isGroupStagePlayoff && groupStageKind == GroupStageKind.Swiss;
+        var playoffIsSingleElimination = type == TournamentType.SingleElimination
+            || (isGroupStagePlayoff && playoffKind == PlayoffKind.SingleElimination);
+
+        if (!playoffIsSingleElimination && thirdPlaceEnabled)
         {
-            throw new DomainException("Third place match is available only for Single Elimination tournaments.");
+            throw new DomainException("Third place match is available only for a Single Elimination bracket.");
         }
 
         // Every per-segment format falls back to the tournament's single default when not given
@@ -974,10 +1161,19 @@ public class Tournament
         // existing Double Elimination or Group Stage + Playoff tournament (or a caller that only ever
         // set one format) behaves exactly as it did with a single uniform format.
         var usesBracketFormats = type is TournamentType.DoubleElimination or TournamentType.GroupStagePlayoff;
-        var resolvedGroupStageFormat = type == TournamentType.GroupStagePlayoff ? groupStageMatchFormat ?? defaultMatchFormat : defaultMatchFormat;
+        var resolvedGroupStageFormat = isGroupStagePlayoff ? groupStageMatchFormat ?? defaultMatchFormat : defaultMatchFormat;
         var resolvedUpperFormat = usesBracketFormats ? upperBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
         var resolvedLowerFormat = usesBracketFormats ? lowerBracketFormat ?? defaultMatchFormat : defaultMatchFormat;
         var resolvedGrandFinalFormat = usesBracketFormats ? grandFinalFormat ?? defaultMatchFormat : defaultMatchFormat;
+
+        // A single-elimination playoff has neither a Loser Bracket nor a Grand Final, so those two
+        // formats collapse onto the one bracket format - the same "collapse to the default when the
+        // segment doesn't exist" convention the non-bracket types use above.
+        if (isGroupStagePlayoff && playoffKind == PlayoffKind.SingleElimination)
+        {
+            resolvedLowerFormat = resolvedUpperFormat;
+            resolvedGrandFinalFormat = resolvedUpperFormat;
+        }
 
         // Only the Group Stage format may allow draws (Best of 2) - every bracket match needs a winner.
         if (defaultMatchFormat.AllowsDraw() || resolvedUpperFormat.AllowsDraw()
@@ -986,9 +1182,28 @@ public class Tournament
             throw new DomainException("Only the Group Stage format may allow draws (Best of 2).");
         }
 
-        if (type == TournamentType.GroupStagePlayoff && groupCount < 2)
+        // A Swiss pool ranks on match wins, and a bye - which is a win with no games played - would sit
+        // below every real win under Best-of-2's games-won ranking. Draws have no place in a format
+        // whose whole job is to separate the field, so Best of 2 is a round-robin-groups-only option.
+        if (usesSwiss && resolvedGroupStageFormat.AllowsDraw())
         {
-            throw new DomainException("Group Stage + Playoff needs at least 2 groups.");
+            throw new DomainException("A Swiss group stage cannot use Best of 2 - choose a decisive format.");
+        }
+
+        if (isGroupStagePlayoff && !usesSwiss && groupCount < 2)
+        {
+            throw new DomainException("Round-robin groups need at least 2 groups.");
+        }
+
+        // 0 is "the largest capacity the roster fills", resolved at start time against the real roster.
+        if (isGroupStagePlayoff && playoffSize > 0)
+        {
+            GroupStagePlayoffBracket.ValidateSupportedSize(playoffSize);
+        }
+
+        if (usesSwiss && swissRounds is < 0 or > MaxSwissRounds)
+        {
+            throw new DomainException($"A Swiss group stage plays between 1 and {MaxSwissRounds} rounds.");
         }
 
         Name = name;
@@ -997,13 +1212,17 @@ public class Tournament
         Type = type;
         DefaultMatchFormat = defaultMatchFormat;
         DefaultScoreType = defaultScoreType;
-        ThirdPlaceEnabled = type == TournamentType.SingleElimination && thirdPlaceEnabled;
-        GroupCount = type == TournamentType.GroupStagePlayoff ? groupCount : 0;
+        ThirdPlaceEnabled = playoffIsSingleElimination && thirdPlaceEnabled;
+        GroupCount = isGroupStagePlayoff && !usesSwiss ? groupCount : 0;
         TiebreakerPolicy = tiebreakerPolicy;
         GroupStageMatchFormat = resolvedGroupStageFormat;
         UpperBracketFormat = resolvedUpperFormat;
         LowerBracketFormat = resolvedLowerFormat;
         GrandFinalFormat = resolvedGrandFinalFormat;
+        GroupStageKind = isGroupStagePlayoff ? groupStageKind : GroupStageKind.RoundRobin;
+        PlayoffKind = isGroupStagePlayoff ? playoffKind : PlayoffKind.DoubleElimination;
+        PlayoffSize = isGroupStagePlayoff ? playoffSize : 0;
+        SwissRounds = usesSwiss ? swissRounds : 0;
     }
 
     private void EnsurePlanned(string action)

@@ -5,27 +5,44 @@ using Adaminator.Domain.Exceptions;
 namespace Adaminator.Domain.Brackets;
 
 /// <summary>
-/// TI-style two-stage bracket construction. Stage 1 is a per-group round robin (reusing
-/// <see cref="RoundRobinBracket.Schedule"/>). Stage 2 is a standard double-elimination playoff, built
-/// later from the group standings: each group's top half enters the Winner Bracket and its bottom
-/// half the Loser Bracket. The playoff reuses <see cref="DoubleEliminationBracket.GenerateTopology"/>
-/// wholesale - the K upper seeds occupy the Winner Bracket's round 2 (a round-1 bye) and the K lower
-/// seeds fill the Loser Bracket's round 1 (where Winner Bracket round-1 losers would normally arrive),
-/// so Winner round 1 is simply never materialized. v1 requires a power-of-two participant count so the
-/// playoff is bye-free.
+/// TI-style two-stage bracket construction. Stage 1 is either a per-group round robin (reusing
+/// <see cref="RoundRobinBracket.Schedule"/>) or one Swiss pool (see <see cref="SwissBracket"/>);
+/// stage 2 is a playoff built later from the resulting standings. Which of the four combinations a
+/// tournament plays is set by its <see cref="GroupStageKind"/> and <see cref="PlayoffKind"/>.
+///
+/// A <see cref="PlayoffKind.DoubleElimination"/> playoff reuses
+/// <see cref="DoubleEliminationBracket.GenerateTopology"/> wholesale - the K upper seeds occupy the
+/// Winner Bracket's round 2 (a round-1 bye) and the K lower seeds fill the Loser Bracket's round 1
+/// (where Winner Bracket round-1 losers would normally arrive), so Winner round 1 is never
+/// materialized. A <see cref="PlayoffKind.SingleElimination"/> playoff seeds every qualifier into one
+/// bye-free tree instead. Either way the playoff capacity is a clean power of two, so no bye cascade
+/// is ever needed.
 /// </summary>
 public static class GroupStagePlayoffBracket
 {
+    /// <summary>The playoff sizes an admin may cut to - the same set for both playoff kinds.</summary>
+    public static IReadOnlyList<int> SupportedPlayoffSizes => DoubleEliminationBracket.SupportedCapacities;
+
     /// <summary>
-    /// How many participants reach the playoff: the largest bye-free double-elimination capacity that
-    /// fits the roster (4, 8, 16 or 32). Anyone the roster carries beyond that is eliminated at the end
-    /// of the group stage, so the playoff itself is always a clean power of two.
+    /// The default cut when the admin hasn't chosen one: the largest supported capacity that fits the
+    /// roster (4, 8, 16 or 32). Anyone beyond it is eliminated at the end of the group stage, so the
+    /// playoff itself is always a clean power of two.
     /// </summary>
-    public static int PlayoffCapacity(int participantCount) =>
-        DoubleEliminationBracket.SupportedCapacities
+    public static int LargestCapacityFor(int participantCount) =>
+        SupportedPlayoffSizes
             .Where(c => c <= participantCount)
             .DefaultIfEmpty(DoubleEliminationBracket.MinCapacity)
             .Max();
+
+    /// <summary>
+    /// The seed-order indices where crossing changes a participant's fate: the Upper/Lower split (a
+    /// double-elimination playoff only) and the playoff cut itself. The one definition of "a boundary
+    /// worth playing off", shared by <see cref="PlanLevels"/> and the tie-breaker search.
+    /// </summary>
+    public static IReadOnlyList<int> SeedCuts(int capacity, PlayoffKind playoffKind) =>
+        playoffKind == PlayoffKind.DoubleElimination
+            ? new[] { capacity / 2, capacity }
+            : new[] { capacity };
 
     /// <summary>Group sizes for <paramref name="participantCount"/> dealt into <paramref name="groupCount"/> groups, as even as possible with the remainder going to the earlier groups.</summary>
     public static IReadOnlyList<int> GroupSizes(int participantCount, int groupCount)
@@ -35,7 +52,35 @@ public static class GroupStagePlayoffBracket
         return Enumerable.Range(0, groupCount).Select(g => baseSize + (g < remainder ? 1 : 0)).ToList();
     }
 
-    /// <summary>Validates the group/participant shape; thrown at tournament start (mirrors the other builders' start-time validation).</summary>
+    /// <summary>
+    /// Validates a chosen playoff size on its own, without a roster - the check available when the
+    /// tournament's settings are set, before anyone has been added.
+    /// </summary>
+    public static void ValidateSupportedSize(int size)
+    {
+        if (!SupportedPlayoffSizes.Contains(size))
+        {
+            throw new DomainException(
+                $"A playoff of {size} is not supported; choose one of {string.Join(", ", SupportedPlayoffSizes)}.");
+        }
+    }
+
+    /// <summary>
+    /// Validates the playoff cut against the roster it has to be filled from, at start time. Applies to
+    /// both group-stage kinds - the cut is a property of the playoff, not of how the group stage was played.
+    /// </summary>
+    public static void ValidatePlayoffCapacity(int participantCount, int capacity)
+    {
+        ValidateSupportedSize(capacity);
+
+        if (capacity > participantCount)
+        {
+            throw new DomainException(
+                $"A playoff of {capacity} needs at least {capacity} participants; {participantCount} given.");
+        }
+    }
+
+    /// <summary>Validates the group/participant shape of a round-robin group stage; thrown at tournament start (mirrors the other builders' start-time validation).</summary>
     public static void ValidateShape(int participantCount, int groupCount)
     {
         if (participantCount < DoubleEliminationBracket.MinCapacity)
@@ -97,9 +142,10 @@ public static class GroupStagePlayoffBracket
     /// Levels for the given group sizes. Sizes and positions depend only on how many participants each
     /// group holds - never on results - so the whole plan is known the moment the groups are drawn.
     /// </summary>
-    public static IReadOnlyList<PlacementLevel> PlanLevels(IReadOnlyList<int> groupSizes, int capacity)
+    public static IReadOnlyList<PlacementLevel> PlanLevels(
+        IReadOnlyList<int> groupSizes, int capacity, PlayoffKind playoffKind)
     {
-        var upperCut = capacity / 2;
+        var cuts = SeedCuts(capacity, playoffKind);
         var levels = new List<PlacementLevel>();
         var start = 0;
 
@@ -107,7 +153,7 @@ public static class GroupStagePlayoffBracket
         {
             var size = groupSizes.Count(s => s >= position);
             var end = start + size - 1;
-            levels.Add(new PlacementLevel(position, start, end, Classify(start, end, upperCut, capacity)));
+            levels.Add(new PlacementLevel(position, start, end, Classify(start, end, cuts, capacity)));
             start += size;
         }
 
@@ -121,33 +167,52 @@ public static class GroupStagePlayoffBracket
     /// </summary>
     public static bool SpansCut(int start, int end, int cut) => start < cut && cut <= end;
 
-    private static LevelOutcome Classify(int start, int end, int upperCut, int capacity)
+    /// <summary>
+    /// Where a span of seed indices lands, given the cuts that matter for this playoff kind. A single
+    /// cut (single elimination) means there is no Lower pool at all - everyone inside the capacity is
+    /// <see cref="LevelOutcome.Upper"/>, the playoff's one pool.
+    /// </summary>
+    private static LevelOutcome Classify(int start, int end, IReadOnlyList<int> cuts, int capacity)
     {
-        if (SpansCut(start, end, upperCut) || SpansCut(start, end, capacity))
+        if (cuts.Any(cut => SpansCut(start, end, cut)))
         {
             return LevelOutcome.Contested;
         }
 
-        if (end < upperCut)
+        if (end >= capacity)
         {
-            return LevelOutcome.Upper;
+            return LevelOutcome.Eliminated;
         }
 
-        return end < capacity ? LevelOutcome.Lower : LevelOutcome.Eliminated;
+        return cuts.Count > 1 && end >= cuts[0] ? LevelOutcome.Lower : LevelOutcome.Upper;
     }
+
+    /// <summary>
+    /// Where a single seed index lands. Used for a Swiss pool, whose standings are one flat ordered list
+    /// rather than interleaved group placements - a single index can never straddle a cut, so this is
+    /// never <see cref="LevelOutcome.Contested"/>.
+    /// </summary>
+    public static LevelOutcome ClassifySeedIndex(int index, int capacity, PlayoffKind playoffKind) =>
+        Classify(index, index, SeedCuts(capacity, playoffKind), capacity);
 
     /// <summary>The participants at one placement level - each group's <paramref name="position"/>-th finisher, for every group that has one.</summary>
     public static List<Guid> LevelMembers(IReadOnlyList<IReadOnlyList<Guid>> groupStandings, int position) =>
         groupStandings.Where(g => g.Count >= position).Select(g => g[position - 1]).ToList();
 
     /// <summary>
-    /// Splits a fully ordered seeding list into the Winner Bracket pool, the Loser Bracket pool, and the
-    /// participants who fall outside the playoff capacity and are eliminated at the group stage.
+    /// Splits a fully ordered seeding list into the playoff's entry pools and the participants who fall
+    /// outside the capacity and are eliminated at the group stage. A double-elimination playoff fills
+    /// both pools (Winner Bracket, then Loser Bracket); a single-elimination playoff has one bracket, so
+    /// every qualifier lands in <c>Upper</c> and <c>Lower</c> is empty.
     /// </summary>
-    public static (List<Guid> Upper, List<Guid> Lower, List<Guid> Eliminated) SeedPools(IReadOnlyList<Guid> seedOrder, int capacity) =>
-        (seedOrder.Take(capacity / 2).ToList(),
-         seedOrder.Skip(capacity / 2).Take(capacity - capacity / 2).ToList(),
-         seedOrder.Skip(capacity).ToList());
+    public static (List<Guid> Upper, List<Guid> Lower, List<Guid> Eliminated) SeedPools(
+        IReadOnlyList<Guid> seedOrder, int capacity, PlayoffKind playoffKind)
+    {
+        var upperSize = playoffKind == PlayoffKind.DoubleElimination ? capacity / 2 : capacity;
+        return (seedOrder.Take(upperSize).ToList(),
+                seedOrder.Skip(upperSize).Take(capacity - upperSize).ToList(),
+                seedOrder.Skip(capacity).ToList());
+    }
 
     /// <summary>
     /// The positions inside a group of <paramref name="groupSize"/> where finishing one place lower
@@ -171,12 +236,86 @@ public static class GroupStagePlayoffBracket
     }
 
     /// <summary>
-    /// Builds the playoff match graph from the ordered seed pools. <paramref name="upperSeeds"/> fill
-    /// the Winner Bracket round 2 (pair-wise, in order) and <paramref name="lowerSeeds"/> the Loser
-    /// Bracket round 1; every other match starts empty and is filled by advancement along the routes
-    /// resolved here (same mechanism as <see cref="DoubleEliminationBracket"/>).
+    /// Builds the playoff match graph from the ordered seed pools, in whichever shape the tournament's
+    /// <see cref="Entities.Tournament.PlayoffKind"/> calls for.
     /// </summary>
-    public static List<Match> BuildPlayoff(Tournament tournament, IReadOnlyList<Guid> upperSeeds, IReadOnlyList<Guid> lowerSeeds)
+    public static List<Match> BuildPlayoff(Tournament tournament, IReadOnlyList<Guid> upperSeeds, IReadOnlyList<Guid> lowerSeeds) =>
+        tournament.PlayoffKind == PlayoffKind.SingleElimination
+            ? BuildSingleEliminationPlayoff(tournament, upperSeeds)
+            : BuildDoubleEliminationPlayoff(tournament, upperSeeds, lowerSeeds);
+
+    /// <summary>
+    /// One bye-free single-elimination tree over every qualifier, seeded adjacently in order (seeds 0v1,
+    /// 2v3, …) - the same convention <see cref="SingleEliminationBracket.ComputeRound1Pairings"/> uses
+    /// once byes are exhausted, and the same one the double-elimination playoff seeds its pools with.
+    ///
+    /// Unlike a standalone Single Elimination tournament, which recomputes its one forward route from
+    /// round math, this stores explicit routes like the double-elimination playoff does. That keeps
+    /// every Group Stage + Playoff on one advancement mechanism regardless of playoff kind, so
+    /// advancement and undo need no per-kind branching.
+    /// </summary>
+    private static List<Match> BuildSingleEliminationPlayoff(Tournament tournament, IReadOnlyList<Guid> seeds)
+    {
+        var capacity = seeds.Count;
+        var rounds = SingleEliminationBracket.RoundCount(capacity);
+        var format = tournament.PlayoffFormatFor(BracketSegment.Winner);
+        var scoreType = tournament.DefaultScoreType;
+
+        var byPosition = new Dictionary<(int Round, int Index), Match>();
+        for (var round = 1; round <= rounds; round++)
+        {
+            for (var index = 0; index < capacity >> round; index++)
+            {
+                var seeded = round == 1;
+                byPosition[(round, index)] = Match.Create(
+                    tournament.Id,
+                    BracketSegment.Winner,
+                    round,
+                    index,
+                    seeded ? seeds[2 * index] : null,
+                    seeded ? seeds[2 * index + 1] : null,
+                    format,
+                    scoreType);
+            }
+        }
+
+        // A Third Place match is fed by the two semifinal losers, mirroring how their winners feed the
+        // Final's slots A/B.
+        Match? thirdPlace = null;
+        if (tournament.ThirdPlaceEnabled && rounds >= 2)
+        {
+            thirdPlace = Match.Create(tournament.Id, BracketSegment.ThirdPlace, rounds, 0, null, null, format, scoreType);
+        }
+
+        foreach (var ((round, index), match) in byPosition)
+        {
+            var next = SingleEliminationBracket.NextWinnerSlot(round, index, rounds);
+            var winnerTo = next is { } slot ? byPosition[(slot.Round, slot.IndexInRound)] : null;
+            var loserTo = thirdPlace is not null && round == rounds - 1 ? thirdPlace : null;
+
+            match.SetRoutes(
+                winnerTo?.Id,
+                next?.SlotA,
+                loserTo?.Id,
+                loserTo is null ? null : SingleEliminationBracket.ThirdPlaceSlotAFromSemifinalIndex(index));
+        }
+
+        var matches = byPosition.Values.ToList();
+        if (thirdPlace is not null)
+        {
+            matches.Add(thirdPlace);
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// <paramref name="upperSeeds"/> fill the Winner Bracket round 2 (pair-wise, in order) and
+    /// <paramref name="lowerSeeds"/> the Loser Bracket round 1; every other match starts empty and is
+    /// filled by advancement along the routes resolved here (same mechanism as
+    /// <see cref="DoubleEliminationBracket"/>).
+    /// </summary>
+    private static List<Match> BuildDoubleEliminationPlayoff(Tournament tournament, IReadOnlyList<Guid> upperSeeds, IReadOnlyList<Guid> lowerSeeds)
     {
         var capacity = upperSeeds.Count + lowerSeeds.Count;
         var topology = DoubleEliminationBracket.GenerateTopology(capacity);

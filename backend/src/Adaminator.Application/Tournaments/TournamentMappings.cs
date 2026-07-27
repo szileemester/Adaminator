@@ -19,6 +19,12 @@ internal static class TournamentMappings
         tournament.UpperBracketFormat,
         tournament.LowerBracketFormat,
         tournament.GrandFinalFormat,
+        tournament.GroupStageKind,
+        tournament.PlayoffKind,
+        tournament.PlayoffSize,
+        tournament.SwissRounds,
+        tournament.PlayoffCapacity,
+        tournament.ResolvedSwissRounds,
         tournament.Status,
         tournament.PublicToken,
         tournament.CreatedAt);
@@ -44,6 +50,10 @@ internal static class TournamentMappings
         tournament.UpperBracketFormat,
         tournament.LowerBracketFormat,
         tournament.GrandFinalFormat,
+        tournament.GroupStageKind,
+        tournament.PlayoffKind,
+        tournament.PlayoffCapacity,
+        tournament.ResolvedSwissRounds,
         tournament.Status,
         tournament.Participants.ToOrderedDtos(),
         tournament.Matches.Count > 0 ? BracketProjection.Build(tournament) : null);

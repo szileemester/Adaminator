@@ -30,16 +30,30 @@ internal static class BracketProjection
             return BuildGroupStagePlayoff(tournament, roster);
         }
 
-        var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
-        var totalRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
-        var rounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), roster, tournament);
+        // A standalone Single Elimination tournament's tree is exactly as big as the matches it has, so
+        // it needs no planned capacity to fall back on.
+        return BuildSingleElimination(tournament, roster, plannedCapacity: 0);
+    }
 
+    /// <summary>
+    /// One winner-side elimination tree, plus its optional Third Place match. Shared by a standalone
+    /// Single Elimination tournament and by a Group Stage + Playoff whose playoff is single elimination
+    /// - the only difference is that the latter knows its round count from the chosen cut before any
+    /// playoff match exists, so its leaderboard is fully shaped from the start.
+    /// </summary>
+    private static BracketDto BuildSingleElimination(
+        Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster, int plannedCapacity)
+    {
+        var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
+        var totalRounds = winnerMatches.Count > 0
+            ? winnerMatches.Max(m => m.Round)
+            : SingleEliminationBracket.RoundCount(plannedCapacity);
         var thirdPlace = tournament.Matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
 
         return new BracketDto(
             tournament.Type,
             tournament.Status,
-            WinnerRounds: rounds,
+            WinnerRounds: GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), roster, tournament),
             LoserRounds: Array.Empty<BracketRoundDto>(),
             GrandFinal: null,
             ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, roster, tournament),
@@ -186,28 +200,59 @@ internal static class BracketProjection
             .Where(m => m.Segment == BracketSegment.Tiebreaker)
             .ToLookup(m => m.GroupIndex);
         var participantsByGroup = tournament.Participants.ToLookup(p => p.GroupIndex);
+        var capacity = tournament.PlayoffCapacity;
+        var playoffKind = tournament.PlayoffKind;
 
-        var groups = new List<GroupDto>(tournament.GroupCount);
-        for (var g = 0; g < tournament.GroupCount; g++)
+        // A Swiss group stage is one pool: no groups, and its schedule/standings hang off GroupStage.
+        var swiss = tournament.UsesSwissGroupStage;
+        var groups = new List<GroupDto>(swiss ? 0 : tournament.GroupCount);
+        if (!swiss)
         {
-            var groupMatches = matchesByGroup[g].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList();
-            var groupTiebreakers = tiebreakersByGroup[g].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList();
+            // Placement outcomes come from the cut alone, so every position's destination is known
+            // before a single match is played.
+            var levels = GroupStagePlayoffBracket.PlanLevels(tournament.CurrentGroupSizes(), capacity, playoffKind);
 
-            groups.Add(new GroupDto(
-                g,
-                GroupIntoRounds(groupMatches, PlainRoundTitle, roster, tournament),
-                // Standings rank over the group's round-robin AND tie-breaker matches, so they show the played order.
-                BuildStandings(groupMatches.Concat(groupTiebreakers).ToList(), participantsByGroup[g].ToList(), roster, tournament.RanksGroupsByGamesWon),
-                GroupIntoRounds(groupTiebreakers, PlainRoundTitle, roster, tournament)));
+            for (var g = 0; g < tournament.GroupCount; g++)
+            {
+                var groupMatches = matchesByGroup[g].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList();
+                var groupTiebreakers = tiebreakersByGroup[g].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList();
+                var standings = BuildStandings(
+                    groupMatches.Concat(groupTiebreakers).ToList(), participantsByGroup[g].ToList(), roster, tournament.RanksGroupsByGamesWon);
+
+                groups.Add(new GroupDto(
+                    g,
+                    GroupIntoRounds(groupMatches, PlainRoundTitle, roster, tournament),
+                    // Standings rank over the group's round-robin AND tie-breaker matches, so they show the played order.
+                    WithPlacementOutcomes(standings, index => levels[index].Outcome),
+                    GroupIntoRounds(groupTiebreakers, PlainRoundTitle, roster, tournament)));
+            }
         }
 
-        // The playoff *is* a standard double elimination, so reuse that projection wholesale and just
+        var poolMatches = matchesByGroup[null].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList();
+        var poolStandings = swiss
+            ? WithPlacementOutcomes(
+                BuildStandings(
+                    poolMatches.Concat(tiebreakersByGroup[null]).ToList(), tournament.Participants.ToList(), roster, tournament.RanksGroupsByGamesWon),
+                index => GroupStagePlayoffBracket.ClassifySeedIndex(index, capacity, playoffKind))
+            : Array.Empty<StandingRowDto>();
+
+        // The playoff is a standard bracket of the chosen kind, so reuse that projection wholesale and
         // layer the group stage on top. Before StartPlayoffs it simply projects empty playoff rounds.
-        var playoff = BuildDoubleElimination(tournament, roster);
+        var playoff = playoffKind == PlayoffKind.SingleElimination
+            ? BuildSingleElimination(tournament, roster, plannedCapacity: capacity)
+            : BuildDoubleElimination(tournament, roster);
 
         return playoff with
         {
             Groups = groups,
+            GroupStage = new GroupStageDto(
+                tournament.GroupStageKind,
+                playoffKind,
+                swiss ? GroupIntoRounds(poolMatches, PlainRoundTitle, roster, tournament) : Array.Empty<BracketRoundDto>(),
+                poolStandings,
+                RoundsPlayed: poolMatches.Count == 0 ? 0 : poolMatches.Max(m => m.Round),
+                RoundsTotal: swiss ? tournament.ResolvedSwissRounds : 0,
+                CanStartNextRound: tournament.CanStartNextSwissRound),
             // Cross-group deciders (played between groups when a placement level is contested) belong to
             // no single group, so they surface at the top level alongside the per-group ones.
             TiebreakerRounds = GroupIntoRounds(
@@ -218,6 +263,11 @@ internal static class BracketProjection
         };
     }
 
+    /// <summary>Stamps each standings row with where finishing in that position sends the participant.</summary>
+    private static IReadOnlyList<StandingRowDto> WithPlacementOutcomes(
+        IReadOnlyList<StandingRowDto> standings, Func<int, LevelOutcome> outcomeAt) =>
+        standings.Select((row, index) => row with { PlayoffDestination = outcomeAt(index) }).ToList();
+
     /// <summary>
     /// Appends the final placement row for anyone the roster carries beyond the playoff capacity - they
     /// are knocked out at the end of the group stage and share the last ranks. Like every other row it
@@ -227,7 +277,7 @@ internal static class BracketProjection
         IReadOnlyList<PlacementGroupDto> placements, Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var total = tournament.Participants.Count;
-        var capacity = GroupStagePlayoffBracket.PlayoffCapacity(total);
+        var capacity = tournament.PlayoffCapacity;
         if (total <= capacity)
         {
             return placements;
@@ -286,10 +336,10 @@ internal static class BracketProjection
         var grandFinal = tournament.Matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
         var thirdPlacePodium = ToSlot(tournament.ThirdPlaceParticipantId, roster);
 
-        // Group Stage + Playoff takes the largest power of two the roster can fill (the rest are
-        // eliminated at the group stage); plain Double Elimination pads up to the next power of two.
+        // Group Stage + Playoff cuts to its chosen playoff size (the rest are eliminated at the group
+        // stage); plain Double Elimination pads up to the next power of two.
         var plannedCapacity = tournament.Type == TournamentType.GroupStagePlayoff
-            ? GroupStagePlayoffBracket.PlayoffCapacity(tournament.Participants.Count)
+            ? tournament.PlayoffCapacity
             : DoubleEliminationBracket.ComputeBracketSize(tournament.Participants.Count);
 
         return new BracketDto(

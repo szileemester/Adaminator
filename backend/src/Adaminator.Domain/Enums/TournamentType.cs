@@ -10,9 +10,9 @@ public enum TournamentType
     RoundRobin = 2,
 
     /// <summary>
-    /// Two-stage (TI-style): a per-group round-robin group stage, then a manually-started double
-    /// elimination playoff seeded from the group standings (each group's top half enters the Winner
-    /// Bracket, its bottom half the Loser Bracket).
+    /// Two-stage (TI-style): a group stage, then a manually-started playoff seeded from its standings.
+    /// <see cref="GroupStageKind"/> chooses how the group stage is played (round-robin groups or one
+    /// Swiss pool) and <see cref="PlayoffKind"/> chooses the playoff's structure.
     /// </summary>
     GroupStagePlayoff = 3
 }

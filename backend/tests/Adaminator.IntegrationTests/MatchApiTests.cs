@@ -388,6 +388,91 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Swiss_group_stage_pairs_each_round_on_request_then_seeds_a_single_elimination_playoff()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var create = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = $"Swiss {Guid.NewGuid():N}",
+            date = "2026-07-26",
+            type = "GroupStagePlayoff",
+            defaultMatchFormat = "Bo1",
+            thirdPlaceEnabled = false,
+            defaultScoreType = "Games",
+            groupCount = 0,
+            groupStageKind = "Swiss",
+            playoffKind = "SingleElimination",
+            swissRounds = 2
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+
+        var participantIds = new List<Guid>();
+        foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H" })
+        {
+            var added = await client.PostAsJsonAsync($"/api/tournaments/{tournamentId}/participants", new { name });
+            participantIds.Add((await added.Content.ReadFromJsonAsync<CreatedParticipant>(JsonOptions))!.Id);
+        }
+
+        // A Swiss pool has no draw - it needs a seed order for round 1, like every non-group type.
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/bracket/draw-groups", null)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await client.PutAsJsonAsync($"/api/tournaments/{tournamentId}/bracket", new
+        {
+            order = participantIds,
+            byes = Array.Empty<Guid>()
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Only round 1 exists up front; the playoff stays locked until every scheduled round is played.
+        var round1 = await GetBracketAsync(client, tournamentId);
+        round1.Groups.Should().BeEmpty("a Swiss pool has no groups");
+        round1.GroupStage!.Kind.Should().Be("Swiss");
+        round1.GroupStage.RoundsTotal.Should().Be(2);
+        round1.GroupStage.Rounds.Should().HaveCount(1);
+        round1.GroupStage.CanStartNextRound.Should().BeFalse();
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start-swiss-round", null)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        foreach (var match in round1.GroupStage.Rounds.SelectMany(r => r.Matches))
+        {
+            await CompleteBo1Async(client, tournamentId, match.Id);
+        }
+
+        var afterRound1 = await GetBracketAsync(client, tournamentId);
+        afterRound1.CanStartPlayoffs.Should().BeFalse("round 2 has not been paired yet");
+        afterRound1.GroupStage!.CanStartNextRound.Should().BeTrue();
+
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start-swiss-round", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var round2 = await GetBracketAsync(client, tournamentId);
+        round2.GroupStage!.Rounds.Should().HaveCount(2);
+        foreach (var match in round2.GroupStage.Rounds.Single(r => r.Round == 2).Matches)
+        {
+            await CompleteBo1Async(client, tournamentId, match.Id);
+        }
+
+        var afterPool = await GetBracketAsync(client, tournamentId);
+        afterPool.GroupStage!.CanStartNextRound.Should().BeFalse();
+        afterPool.GroupStage.Standings.Should().HaveCount(8);
+        afterPool.CanStartPlayoffs.Should().BeTrue();
+
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/start-playoffs", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // A single-elimination playoff: one bracket starting at round 1, no Loser side, no Grand Final.
+        var playoff = await GetBracketAsync(client, tournamentId);
+        playoff.WinnerRounds.Should().Contain(r => r.Round == 1);
+        playoff.LoserRounds.Should().BeEmpty();
+        playoff.GrandFinal.Should().BeNull();
+
+        await PlayOutPlayoffAsync(client, tournamentId);
+
+        (await GetBracketAsync(client, tournamentId)).CanFinish.Should().BeTrue();
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/finish", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.GetFromJsonAsync<TournamentStatusResponse>($"/api/tournaments/{tournamentId}", JsonOptions))!
+            .Status.Should().Be("Finished");
+    }
+
+    [Fact]
     public async Task Group_stage_playoff_full_flow_draws_plays_groups_seeds_and_finishes_the_playoff()
     {
         var client = await CreateAuthenticatedClientAsync();
@@ -671,6 +756,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     }
 
     private record CreatedTournament(Guid Id, string PublicToken);
+    private record CreatedParticipant(Guid Id, string Name);
     private record TournamentStatusResponse(string Status);
     private record LoginBody(string Token);
     private record ParticipantSlotResponse(Guid ParticipantId, string Name);
@@ -684,6 +770,14 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     private record PlacementGroupResponse(int RankStart, int RankEnd, string Label, List<ParticipantSlotResponse> Participants);
     private record StandingRowResponse(int Rank, Guid ParticipantId, string Name, int Played, int Wins, int Losses, int GamesWon);
     private record GroupResponse(int GroupIndex, List<RoundResponse> Rounds, List<StandingRowResponse> Standings, List<RoundResponse> TiebreakerRounds);
+    private record GroupStageResponse(
+        string Kind,
+        string PlayoffKind,
+        List<RoundResponse> Rounds,
+        List<StandingRowResponse> Standings,
+        int RoundsPlayed,
+        int RoundsTotal,
+        bool CanStartNextRound);
     private record BracketResponse(
         List<RoundResponse> WinnerRounds,
         List<RoundResponse> LoserRounds,
@@ -695,5 +789,6 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         List<RoundResponse> TiebreakerRounds,
         bool NeedsTiebreakers,
         bool CanStartPlayoffs,
-        bool CanFinish);
+        bool CanFinish,
+        GroupStageResponse? GroupStage);
 }

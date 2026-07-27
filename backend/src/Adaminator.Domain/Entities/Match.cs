@@ -101,6 +101,30 @@ public class Match
         WinnerId = null
     };
 
+    /// <summary>
+    /// A Swiss bye: the odd participant out sits the round and is credited the win. Created already
+    /// decided, with no opponent and no games. <see cref="CompletionSequence"/> stays null so the bye
+    /// never counts as "the most recently decided match" - it is structural, not a result, and must
+    /// not be undoable or block the undo of a real match played in the same round.
+    /// </summary>
+    internal static Match CreateBye(Guid tournamentId, int round, int indexInRound, Guid participantId, MatchFormat matchFormat, ScoreType scoreType) => new()
+    {
+        Id = Guid.NewGuid(),
+        TournamentId = tournamentId,
+        Segment = BracketSegment.RoundRobin,
+        Round = round,
+        IndexInRound = indexInRound,
+        ParticipantAId = participantId,
+        ParticipantBId = null,
+        MatchFormat = matchFormat,
+        ScoreType = scoreType,
+        Status = MatchStatus.Completed,
+        WinnerId = participantId
+    };
+
+    /// <summary>Whether this is a Swiss bye - one participant, no opponent, already won. See <see cref="CreateBye"/>.</summary>
+    public bool IsBye => ParticipantAId is not null && ParticipantBId is null && Segment == BracketSegment.RoundRobin;
+
     // ---- Result entry (BR-013 through BR-020; called only via Tournament) ----
 
     /// <summary>Persists a (possibly partial) detailed score. Always leaves the match undecided (FR-MATCH-006/007, AC-SCORE-002).</summary>

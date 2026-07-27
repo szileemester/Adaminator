@@ -25,13 +25,7 @@ public class BracketService
             .OrderBy(_ => Random.Shared.Next())
             .ToList();
 
-        var requiredByes = tournament.Type switch
-        {
-            TournamentType.DoubleElimination => DoubleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count),
-            TournamentType.RoundRobin => RoundRobinBracket.ComputeRequiredByes(tournament.Participants.Count),
-            _ => SingleEliminationBracket.ComputeRequiredByes(tournament.Participants.Count)
-        };
-        var defaultByes = shuffled.Take(requiredByes).ToList();
+        var defaultByes = shuffled.Take(tournament.RequiredByes).ToList();
 
         tournament.ApplySeeding(shuffled, defaultByes);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -69,6 +63,15 @@ public class BracketService
     {
         var tournament = await LoadAsync(tournamentId, cancellationToken);
         tournament.StartPlayoffs();
+        await _repository.SaveChangesAsync(cancellationToken);
+        return tournament.ToDto();
+    }
+
+    /// <summary>Swiss group stage: pairs the next round from the current standings (rejected until every match of the current round is decided).</summary>
+    public async Task<TournamentDto> StartNextSwissRoundAsync(Guid tournamentId, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.StartNextSwissRound();
         await _repository.SaveChangesAsync(cancellationToken);
         return tournament.ToDto();
     }

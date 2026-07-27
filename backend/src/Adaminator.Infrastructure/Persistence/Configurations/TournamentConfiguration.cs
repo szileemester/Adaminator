@@ -49,6 +49,20 @@ public class TournamentConfiguration : IEntityTypeConfiguration<Tournament>
         // Group Stage + Playoff only; 0 for every other type.
         builder.Property(t => t.GroupCount).IsRequired();
 
+        builder.Property(t => t.GroupStageKind)
+            .HasConversion<string>()
+            .HasMaxLength(30)
+            .IsRequired();
+
+        builder.Property(t => t.PlayoffKind)
+            .HasConversion<string>()
+            .HasMaxLength(30)
+            .IsRequired();
+
+        // Group Stage + Playoff only; 0 means "derive from the roster".
+        builder.Property(t => t.PlayoffSize).IsRequired();
+        builder.Property(t => t.SwissRounds).IsRequired();
+
         builder.Property(t => t.TiebreakerPolicy)
             .HasConversion<string>()
             .HasMaxLength(30)
