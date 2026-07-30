@@ -8,13 +8,14 @@ internal static class ParticipantMappings
         new(participant.Id, participant.Name, participant.Emoji, participant.Seed, participant.HasBye, participant.GroupIndex);
 
     /// <summary>
-    /// Always alphabetical by name - the roster is a management list, not a seeding view, so it
-    /// shouldn't visibly reorder itself the moment a bracket is generated. Each DTO still carries its
-    /// own <see cref="ParticipantDto.Seed"/>; the bracket preview sorts by that itself.
+    /// Always in roster order - the order the organizer added them in. The roster is a management
+    /// list, not a seeding view, so it must neither reorder itself the moment a bracket is generated
+    /// (which sorting by <see cref="ParticipantDto.Seed"/> would do) nor rearrange the list someone
+    /// just typed (which sorting by name would do). The bracket preview sorts by seed itself.
     /// </summary>
     public static IReadOnlyList<ParticipantDto> ToOrderedDtos(this IEnumerable<Participant> participants) =>
         participants
-            .OrderBy(p => p.Name)
+            .OrderBy(p => p.Position)
             .Select(ToDto)
             .ToList();
 }

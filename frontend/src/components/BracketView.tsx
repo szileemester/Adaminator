@@ -45,12 +45,30 @@ const RANK_COLORS: Record<number, { trophy: string; bg: string }> = {
  * elimination one has just the one, so "Upper" is simply "in". "Contested" means equally-placed
  * participants are still competing for the last slots either side of a cut.
  */
-const PLAYOFF_DESTINATIONS: Record<LevelOutcome, { label: string; text: string; bg: string }> = {
-  Upper: { label: 'Upper Bracket', text: '#3fb950', bg: 'rgba(63,185,80,0.15)' },
-  Lower: { label: 'Lower Bracket', text: '#ffa726', bg: 'rgba(255,167,38,0.15)' },
-  Contested: { label: 'Contested', text: '#7c9cff', bg: 'rgba(124,156,255,0.15)' },
-  Eliminated: { label: 'Eliminated', text: '#8b949e', bg: 'rgba(139,148,158,0.15)' },
+const PLAYOFF_DESTINATIONS: Record<LevelOutcome, { label: string; short: string; text: string; bg: string }> = {
+  Upper: { label: 'Upper Bracket', short: 'UB', text: '#3fb950', bg: 'rgba(63,185,80,0.15)' },
+  Lower: { label: 'Lower Bracket', short: 'LB', text: '#ffa726', bg: 'rgba(255,167,38,0.15)' },
+  Contested: { label: 'Contested', short: 'CT', text: '#7c9cff', bg: 'rgba(124,156,255,0.15)' },
+  Eliminated: { label: 'Eliminated', short: 'EL', text: '#8b949e', bg: 'rgba(139,148,158,0.15)' },
 };
+
+/**
+ * Full wording on a normal screen, an abbreviation on a phone. Rendered as two spans toggled by CSS
+ * rather than a `useMediaQuery` branch, so the standings table needs no width measurement to lay out
+ * and the abbreviation never flashes before the query resolves.
+ */
+function ResponsiveChipLabel({ full, short }: { full: string; short: string }) {
+  return (
+    <>
+      <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+        {full}
+      </Box>
+      <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }} title={full}>
+        {short}
+      </Box>
+    </>
+  );
+}
 
 function formatOrdinal(n: number): string {
   const mod100 = n % 100;
@@ -97,6 +115,19 @@ const CARD_RADIUS = 10;
 const EXTRA_MATCH_GAP = 20; // space between the last round's card and the extra match's label
 const LABEL_ROW_HEIGHT = 28; // reserved height for one subtitle2 label row (a round header, or the extra match's label)
 const SECTION_GAP = 32; // vertical space between the winner and loser bracket regions
+
+/**
+ * The narrowest the standings table stays readable at. Below this it scrolls sideways inside its own
+ * container rather than squeezing six columns into a phone: a "Played / Wins / Losses / Games" row
+ * compressed to 300px wraps every heading onto three lines and still clips the names.
+ *
+ * The matches table has no such floor - it is three columns wide and always fits, truncating names
+ * instead (see GroupMatchesTable).
+ */
+const GROUP_TABLE_MIN_WIDTH = 460;
+
+/** Width of a match's middle column - wide enough for "12 - 10" plus a forfeit badge. */
+const MATCH_SCORE_COLUMN = 96;
 
 /**
  * A stage the admin just created matches in, so the view can jump to it. Carries an `at` stamp rather
@@ -929,18 +960,13 @@ function slotHighlight(slot: BracketSlot | null, winnerId: string | null, hovere
 }
 
 /**
- * The score to show for one side of a decided match: total games won for every format except a
- * decisive Bo1 scored by Points, where "games won" would just be 1-0 - the actual point score is
- * more informative there. Null while the match isn't decided yet (nothing to show).
+ * The score to show for one side of a decided match: always the match result (games won), never the
+ * points from within a game. A bracket reports who won the match; per-game points belong in the
+ * result dialog, which lists them game by game. Null while the match isn't decided yet.
  */
 function displayScore(match: BracketMatch, isSlotA: boolean): number | null {
   if (!isDecided(match)) {
     return null;
-  }
-
-  if (match.matchFormat === 'Bo1' && match.scoreType === 'Points') {
-    const entry = match.entries[0];
-    return (isSlotA ? entry?.scoreA : entry?.scoreB) ?? null;
   }
 
   return isSlotA ? match.aggregateScoreA : match.aggregateScoreB;
@@ -1075,12 +1101,26 @@ function GroupMatchesTable({
     overrides[round.round] ?? !(collapseDecidedRounds && roundIsDecided(round));
 
   return (
-    <Stack spacing={1}>
+    // minWidth: 0 so this flex child may shrink below its content. Without it the wrapper grows to
+    // the table's natural width, the TableContainer never becomes narrower than what it holds, and
+    // its overflow-x has nothing to scroll - the card just clips the overhang.
+    <Stack spacing={1} sx={{ minWidth: 0 }}>
       <Typography variant="subtitle2" color="text.secondary">
         {title}
       </Typography>
       <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
+        {/*
+          Fixed layout with an explicit column split, so a fixture always fits the width it is given
+          and long names ellipsize (ParticipantLabel's name is already noWrap) instead of widening the
+          table. Declared as a colgroup rather than as widths on the cells because the round header
+          above them spans all three columns, and an auto-layout table would size the columns from it.
+        */}
+        <Table size="small" sx={{ tableLayout: 'fixed' }}>
+          <Box component="colgroup">
+            <col />
+            <Box component="col" sx={{ width: MATCH_SCORE_COLUMN }} />
+            <col />
+          </Box>
           <TableBody>
             {rounds.map((round) => {
               const open = isOpen(round);
@@ -1138,7 +1178,9 @@ function GroupMatchRow({
   // and nothing to enter, so it reads as a labelled sit-out rather than an empty fixture.
   const isBye = match.participantA != null && match.participantB == null;
 
-  const nameCell = (slot: BracketSlot | null) => {
+  // The two sides face each other across the score: the first reads left-to-right from the left edge,
+  // the second is mirrored against the right edge.
+  const nameCell = (slot: BracketSlot | null, align: 'start' | 'end' = 'start') => {
     const { rowSx, textSx } = slotHighlight(slot, match.winnerId, hoveredId);
     return (
       <TableCell
@@ -1146,7 +1188,7 @@ function GroupMatchRow({
         onMouseLeave={slot ? () => onHover(null) : undefined}
         sx={rowSx}
       >
-        <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} pending={!slot} sx={textSx} />
+        <ParticipantLabel name={slot ? slot.name : 'TBD'} emoji={slot?.emoji} pending={!slot} sx={textSx} align={align} />
       </TableCell>
     );
   };
@@ -1171,13 +1213,13 @@ function GroupMatchRow({
         )}
       </TableCell>
       {isBye ? (
-        <TableCell>
-          <Typography variant="body2" color="text.secondary">
+        <TableCell align="right">
+          <Typography variant="body2" color="text.secondary" noWrap>
             sat out - win credited
           </Typography>
         </TableCell>
       ) : (
-        nameCell(match.participantB)
+        nameCell(match.participantB, 'end')
       )}
     </TableRow>
   );
@@ -1209,12 +1251,13 @@ function StandingsTable({
   singleBracketPlayoff?: boolean;
 }) {
   return (
-    <Stack spacing={1}>
+    // See GroupMatchesTable: minWidth: 0 is what lets the container scroll instead of overflowing.
+    <Stack spacing={1} sx={{ minWidth: 0 }}>
       <Typography variant="subtitle2" color="text.secondary">
         Standings
       </Typography>
       <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
+        <Table size="small" sx={{ minWidth: GROUP_TABLE_MIN_WIDTH }}>
           <TableHead>
             <TableRow>
               <TableCell>Place</TableCell>
@@ -1231,6 +1274,11 @@ function StandingsTable({
               const tier = destination ? PLAYOFF_DESTINATIONS[destination] : null;
               const colors = showsPlayoffDestination ? tier : RANK_COLORS[row.rank];
               const isHovered = row.participantId === hoveredId;
+              // A single-elimination playoff has one bracket, so reaching it is simply "Qualified".
+              const wording =
+                singleBracketPlayoff && destination === 'Upper'
+                  ? { full: 'Qualified', short: 'Q' }
+                  : { full: tier?.label ?? '', short: tier?.short ?? '' };
               return (
                 <TableRow
                   key={row.participantId}
@@ -1248,7 +1296,7 @@ function StandingsTable({
                         {tier && (
                           <Chip
                             size="small"
-                            label={singleBracketPlayoff && destination === 'Upper' ? 'Qualified' : tier.label}
+                            label={<ResponsiveChipLabel full={wording.full} short={wording.short} />}
                             sx={{
                               color: tier.text,
                               bgcolor: tier.bg,

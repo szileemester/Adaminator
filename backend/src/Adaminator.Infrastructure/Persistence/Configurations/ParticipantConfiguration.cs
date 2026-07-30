@@ -21,6 +21,9 @@ public class ParticipantConfiguration : IEntityTypeConfiguration<Participant>
         // Optional display emoji; null until the participant picks one.
         builder.Property(p => p.Emoji).HasMaxLength(Participant.EmojiMaxLength);
 
+        // Roster display order (1-based, gaps allowed after a removal).
+        builder.Property(p => p.Position).IsRequired();
+
         builder.Property(p => p.Seed).IsRequired();
         builder.Property(p => p.HasBye).IsRequired();
 

@@ -44,6 +44,12 @@ export interface Tournament {
   playoffCapacity: number;
   /** The Swiss round count actually in force, with 0 resolved against the current roster. */
   resolvedSwissRounds: number;
+  /**
+   * Fewest participants these settings can start with, computed by the domain from every start-time
+   * rule (playoff cut, group count, Swiss rounds). The roster editor floors its player count here
+   * rather than restating those rules, which would drift the moment one of them changes.
+   */
+  minParticipants: number;
   /** Round Robin + Group Stage + Playoff: how standings ties are resolved. */
   tiebreakerPolicy: TiebreakerPolicy;
   /** Group Stage + Playoff only: how group matches are played and scored - any format, including Bo2 (draws, ranked by games won). */
@@ -65,7 +71,7 @@ export type BracketSegment = 'Winner' | 'Loser' | 'GrandFinal' | 'ThirdPlace' | 
 export interface Participant {
   id: string;
   name: string;
-  /** Optional display emoji. Null until chosen, and write-once thereafter (the API rejects a change). */
+  /** Optional display emoji. Null until chosen, and freely changeable while the tournament is Planned. */
   emoji: string | null;
   seed: number;
   hasBye: boolean;
@@ -221,6 +227,17 @@ export interface PublicTournament {
   bracket: Bracket | null;
 }
 
+/** Roster limits, mirroring Tournament.MinParticipants / Tournament.MaxParticipants on the backend. */
+export const MIN_PARTICIPANTS = 2;
+export const MAX_PARTICIPANTS = 32;
+
+/** Name limits, mirroring Tournament.NotesMaxLength on the backend. */
+export const NOTES_MAX_LENGTH = 2000;
+
+/** Name limits, mirroring Tournament.NameMaxLength / Participant.NameMaxLength on the backend. */
+export const TOURNAMENT_NAME_MAX_LENGTH = 50;
+export const PARTICIPANT_NAME_MAX_LENGTH = 30;
+
 /**
  * Smallest power of two >= n (the bracket size). Double Elimination has no 2-slot topology, so it
  * floors at 4 (mirrors DoubleEliminationBracket.ComputeBracketSize on the backend). Round Robin and
@@ -279,6 +296,40 @@ export const playoffKindLabels: Record<PlayoffKind, string> = {
 
 /** The playoff cuts an admin may choose, plus 0 for "the largest that fits the roster". */
 export const playoffSizes = [0, 4, 8, 16, 32] as const;
+
+/**
+ * Which settings a tournament shape actually uses. Shared by the create/edit form and the detail
+ * page's Overview so the two can never disagree about what applies - a setting the form hides is
+ * exactly the one the Overview must not report.
+ */
+export function tournamentSettingsShape(
+  type: TournamentType,
+  groupStageKind: GroupStageKind,
+  playoffKind: PlayoffKind,
+) {
+  const isGroupStagePlayoff = type === 'GroupStagePlayoff';
+  const playoffIsSingleElimination =
+    type === 'SingleElimination' || (isGroupStagePlayoff && playoffKind === 'SingleElimination');
+
+  return {
+    isGroupStagePlayoff,
+    isRoundRobin: type === 'RoundRobin',
+    // A Swiss group stage is one pool, so it has no group count; round-robin groups have no round count.
+    usesRoundRobinGroups: isGroupStagePlayoff && groupStageKind === 'RoundRobin',
+    usesSwissPool: isGroupStagePlayoff && groupStageKind === 'Swiss',
+    // Third Place belongs to whichever bracket is single elimination - standalone, or a playoff.
+    playoffIsSingleElimination,
+    // Single Elimination and Round Robin have one kind of match; the others split it by segment.
+    showsSingleFormat: type === 'SingleElimination' || type === 'RoundRobin',
+    usesBracketFormats: type === 'DoubleElimination' || isGroupStagePlayoff,
+    // A single-elimination playoff has no Loser Bracket and no Grand Final, so one picker covers it.
+    showsAllBracketFormats:
+      type === 'DoubleElimination' || (isGroupStagePlayoff && playoffKind === 'DoubleElimination'),
+    // Only these two produce standings that can tie in a way that changes an outcome.
+    showsTiebreakerPolicy: type === 'RoundRobin' || isGroupStagePlayoff,
+    showsRules: playoffIsSingleElimination || type === 'RoundRobin' || isGroupStagePlayoff,
+  };
+}
 
 export const tournamentTypeLabels: Record<TournamentType, string> = {
   SingleElimination: 'Single Elimination',

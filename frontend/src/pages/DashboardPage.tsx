@@ -22,6 +22,7 @@ import { listTournaments } from '../api/tournaments';
 import type { TournamentStatus, TournamentSummary } from '../api/types';
 import { tournamentTypeLabels } from '../api/types';
 import { StatusChip } from '../components/StatusChip';
+import { breakAnywhereSx } from '../theme';
 import { extractErrorMessage } from '../api/client';
 
 const sections: { status: TournamentStatus; title: string }[] = [
@@ -46,9 +47,23 @@ export function DashboardPage() {
 
   return (
     <Stack spacing={4}>
-      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+      {/*
+        Stacked on a phone: side by side, the heading and a button whose label can't wrap add up to
+        more than a 375px viewport, so they collide instead of sharing the row.
+      */}
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        spacing={2}
+        sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' } }}
+      >
         <Typography variant="h4">Tournaments</Typography>
-        <Button component={RouterLink} to="/tournaments/new" variant="contained" startIcon={<AddIcon />}>
+        <Button
+          component={RouterLink}
+          to="/tournaments/new"
+          variant="contained"
+          startIcon={<AddIcon />}
+          sx={{ flexShrink: 0 }}
+        >
           Create tournament
         </Button>
       </Stack>
@@ -142,7 +157,8 @@ function TournamentCard({ tournament }: { tournament: TournamentSummary }) {
         <CardContent>
           <Stack spacing={1}>
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <Typography variant="h6" sx={{ pr: 1 }}>
+              {/* Not TournamentTitle itself - that is a page heading - but the same name, same problem. */}
+              <Typography variant="h6" sx={{ pr: 1, ...breakAnywhereSx }}>
                 {tournament.name}
               </Typography>
               <StatusChip status={tournament.status} />

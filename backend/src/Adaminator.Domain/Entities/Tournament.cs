@@ -10,7 +10,7 @@ namespace Adaminator.Domain.Entities;
 /// </summary>
 public class Tournament
 {
-    public const int NameMaxLength = 200;
+    public const int NameMaxLength = 50;
     public const int NotesMaxLength = 2000;
     public const int MinParticipants = 2;
     public const int MaxParticipants = 32;
@@ -65,6 +65,50 @@ public class Tournament
 
     /// <summary>Whether this is a Group Stage + Playoff whose group stage is one Swiss pool rather than drawn groups.</summary>
     public bool UsesSwissGroupStage => Type == TournamentType.GroupStagePlayoff && GroupStageKind == GroupStageKind.Swiss;
+
+    /// <summary>
+    /// Fewest participants these settings allow the tournament to start with - the highest floor any of
+    /// <see cref="Start"/>'s validations imposes. Only the admin's explicit choices raise it; a setting
+    /// left on Auto derives itself from the roster and so constrains nothing.
+    ///
+    /// Exposed on the DTO so the roster editor can floor its player count from the same code that will
+    /// judge it, rather than restating these rules client-side where they would drift.
+    /// </summary>
+    public int MinParticipantsToStart
+    {
+        get
+        {
+            if (Type != TournamentType.GroupStagePlayoff)
+            {
+                return MinParticipants;
+            }
+
+            // Every Group Stage + Playoff has to fill the smallest playoff there is.
+            var minimum = DoubleEliminationBracket.MinCapacity;
+
+            // A chosen cut needs a roster that fills it (GroupStagePlayoffBracket.ValidatePlayoffCapacity).
+            if (PlayoffSize > 0)
+            {
+                minimum = Math.Max(minimum, PlayoffSize);
+            }
+
+            if (UsesSwissGroupStage)
+            {
+                // n players supply at most n-1 rounds of fresh pairings (SwissBracket.ValidateShape).
+                if (SwissRounds > 0)
+                {
+                    minimum = Math.Max(minimum, SwissRounds + 1);
+                }
+            }
+            else
+            {
+                // Each drawn group plays a round robin, so each needs two (GroupStagePlayoffBracket.ValidateShape).
+                minimum = Math.Max(minimum, GroupCount * 2);
+            }
+
+            return minimum;
+        }
+    }
 
     /// <summary>
     /// How many admin-chosen first-round byes this tournament's shape needs. The one definition, shared
@@ -203,13 +247,15 @@ public class Tournament
         EnsurePlanned("changed");
         if (_participants.Count >= MaxParticipants)
         {
-            throw new DomainException($"A tournament may have at most {MaxParticipants} participants.");
+            throw TooManyParticipants();
         }
 
         var trimmed = (name ?? string.Empty).Trim();
         EnsureUniqueName(trimmed, excludeId: null);
 
-        var participant = Participant.Create(Id, trimmed, emoji);
+        // Append rather than reuse a gap left by a removal, so an existing roster never reorders.
+        var position = _participants.Count == 0 ? 1 : _participants.Max(p => p.Position) + 1;
+        var participant = Participant.Create(Id, trimmed, position, emoji);
         _participants.Add(participant);
         ResetSeeding();
         return participant;
@@ -225,8 +271,8 @@ public class Tournament
     }
 
     /// <summary>
-    /// Chooses a participant's emoji. Write-once (see <see cref="Participant.SetEmoji"/>) and, like every
-    /// other roster edit, only while the tournament is still Planned.
+    /// Sets, changes, or clears a participant's emoji - like every other roster edit, only while the
+    /// tournament is still Planned.
     /// </summary>
     public void SetParticipantEmoji(Guid participantId, string? emoji)
     {
@@ -239,6 +285,71 @@ public class Tournament
         EnsurePlanned("changed");
         var participant = FindParticipant(participantId);
         _participants.Remove(participant);
+        ResetSeeding();
+    }
+
+    /// <summary>
+    /// Replaces the whole roster in one go, in the order given: entries carrying an existing id are
+    /// kept (renamed and re-emoji'd as needed), entries without one are created, and anyone absent is
+    /// removed. <see cref="Participant.Position"/> becomes the entry's place in the list.
+    ///
+    /// This exists because the roster editor commits every panel at once. Applying that as a stream of
+    /// single-participant calls would be one HTTP round trip and one transaction per player, and a
+    /// failure partway would leave the roster half-written - whereas here the whole thing validates
+    /// before anything changes, so it either lands completely or not at all.
+    /// </summary>
+    public void ReplaceRoster(IReadOnlyList<RosterEntry> entries)
+    {
+        EnsurePlanned("changed");
+        if (entries.Count > MaxParticipants)
+        {
+            throw TooManyParticipants();
+        }
+
+        // Validate everything up front: a roster that fails halfway is worse than one that is refused.
+        // Names go through Participant's own normalizer so this pass enforces every name rule there is,
+        // not a hand-copied subset - a rule it missed would surface mid-apply and half-write the roster.
+        var normalized = entries
+            .Select(e => (e.Id, Name: Participant.NormalizeName(e.Name), e.Emoji))
+            .ToList();
+
+        var missing = normalized.FirstOrDefault(e => e.Id is { } id && _participants.All(p => p.Id != id));
+        if (missing.Id is { } missingId)
+        {
+            throw new DomainException($"Participant '{missingId}' was not found in this tournament.");
+        }
+
+        // Distinct from EnsureUniqueName, which checks one name against the stored roster: here the
+        // submitted list has to be internally consistent, since it replaces that roster wholesale.
+        var duplicate = normalized
+            .GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw DuplicateName(duplicate.First().Name);
+        }
+
+        var keptIds = normalized.Where(e => e.Id.HasValue).Select(e => e.Id!.Value).ToHashSet();
+        _participants.RemoveAll(p => !keptIds.Contains(p.Id));
+
+        // Position carries the order, so the backing list is left however it happens to be - every
+        // reader sorts by Position (see ParticipantMappings.ToOrderedDtos).
+        for (var position = 1; position <= normalized.Count; position++)
+        {
+            var entry = normalized[position - 1];
+            if (entry.Id is { } id)
+            {
+                var existing = FindParticipant(id);
+                existing.Rename(entry.Name);
+                existing.SetEmoji(entry.Emoji);
+                existing.SetPosition(position);
+            }
+            else
+            {
+                _participants.Add(Participant.Create(Id, entry.Name, position, entry.Emoji));
+            }
+        }
+
         ResetSeeding();
     }
 
@@ -1261,9 +1372,17 @@ public class Tournament
 
         if (_participants.Any(p => p.Id != excludeId && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new DomainException($"A participant named '{name}' already exists in this tournament.");
+            throw DuplicateName(name);
         }
     }
+
+    // Shared by the two roster-mutation paths - one participant at a time, and ReplaceRoster - so the
+    // wording of a rule can't drift between them.
+    private static DomainException DuplicateName(string name) =>
+        new($"A participant named '{name}' already exists in this tournament.");
+
+    private static DomainException TooManyParticipants() =>
+        new($"A tournament may have at most {MaxParticipants} participants.");
 
     private void ResetSeeding()
     {

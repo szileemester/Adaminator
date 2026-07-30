@@ -25,6 +25,7 @@ internal static class TournamentMappings
         tournament.SwissRounds,
         tournament.PlayoffCapacity,
         tournament.ResolvedSwissRounds,
+        tournament.MinParticipantsToStart,
         tournament.Status,
         tournament.PublicToken,
         tournament.CreatedAt);

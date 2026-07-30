@@ -50,6 +50,21 @@ public class TournamentTests
     }
 
     [Fact]
+    public void Create_accepts_a_name_at_the_length_limit_and_rejects_one_over_it()
+    {
+        var atLimit = new string('x', Tournament.NameMaxLength);
+        Tournament.Create(
+            atLimit, SampleDate, null, TournamentType.SingleElimination, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt)
+            .Name.Should().Be(atLimit);
+
+        var act = () => Tournament.Create(
+            new string('x', Tournament.NameMaxLength + 1), SampleDate, null,
+            TournamentType.SingleElimination, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt);
+
+        act.Should().Throw<DomainException>().WithMessage("*at most 50 characters*");
+    }
+
+    [Fact]
     public void Create_rejects_third_place_for_double_elimination()
     {
         var act = () => CreateValid(TournamentType.DoubleElimination, thirdPlace: true);

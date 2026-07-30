@@ -31,10 +31,23 @@ public class ParticipantService
     {
         var tournament = await LoadAsync(tournamentId, cancellationToken);
         tournament.RenameParticipant(participantId, request.Name);
-        // Setting the emoji it already has is a no-op, so a plain rename passes straight through.
         tournament.SetParticipantEmoji(participantId, request.Emoji);
         await _repository.SaveChangesAsync(cancellationToken);
         return tournament.Participants.First(p => p.Id == participantId).ToDto();
+    }
+
+    /// <summary>
+    /// Commits an entire roster at once - what the roster editor's single "Participants are set"
+    /// button does. One aggregate load and one transaction, so a rejected roster changes nothing.
+    /// </summary>
+    public async Task<IReadOnlyList<ParticipantDto>> ReplaceAsync(
+        Guid tournamentId, ReplaceRosterRequest request, CancellationToken cancellationToken = default)
+    {
+        var tournament = await LoadAsync(tournamentId, cancellationToken);
+        tournament.ReplaceRoster(
+            request.Participants.Select(p => new RosterEntry(p.Id, p.Name, p.Emoji)).ToList());
+        await _repository.SaveChangesAsync(cancellationToken);
+        return tournament.Participants.ToOrderedDtos();
     }
 
     public async Task RemoveAsync(Guid tournamentId, Guid participantId, CancellationToken cancellationToken = default)

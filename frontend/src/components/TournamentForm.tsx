@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import type { ReactNode } from 'react';
 import type { Control } from 'react-hook-form';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -28,15 +29,23 @@ import {
   playoffSizes,
   scoreTypeLabels,
   tiebreakerPolicyLabels,
+  tournamentSettingsShape,
   tournamentTypeLabels,
+  NOTES_MAX_LENGTH,
+  TOURNAMENT_NAME_MAX_LENGTH,
 } from '../api/types';
+import { SectionHeading } from './SectionHeading';
 
 const decisiveFormat = z.enum(['Bo1', 'Bo3', 'Bo5', 'Bo7']);
 
 const schema = z.object({
-  name: z.string().trim().min(1, 'Name is required').max(200, 'Name is too long'),
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Name is required')
+    .max(TOURNAMENT_NAME_MAX_LENGTH, `Name must be at most ${TOURNAMENT_NAME_MAX_LENGTH} characters`),
   date: z.string().min(1, 'Date is required'),
-  notes: z.string().max(2000, 'Notes are too long').optional(),
+  notes: z.string().max(NOTES_MAX_LENGTH, 'Notes are too long').optional(),
   type: z.enum(['SingleElimination', 'DoubleElimination', 'RoundRobin', 'GroupStagePlayoff']),
   // Single Elimination + Round Robin only: their one match format - never Bo2, they have no group stage.
   defaultMatchFormat: decisiveFormat,
@@ -112,6 +121,23 @@ function FormatPicker({
   );
 }
 
+/**
+ * One titled group of fields. Sections are rendered behind an explicit condition rather than by
+ * inspecting their children, so a section whose every field is hidden never leaves a stray heading.
+ */
+function FormSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Stack spacing={2}>
+      <SectionHeading title={title} />
+      {/* Top-aligned: helper text makes fields differ in height, and a stretched row drags a short
+          control (the third-place checkbox) down against its taller neighbour. */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'start' }}>
+        {children}
+      </Box>
+    </Stack>
+  );
+}
+
 export function TournamentForm({
   initialValues,
   submitLabel,
@@ -151,26 +177,18 @@ export function TournamentForm({
   });
 
   const selectedType = watch('type');
-  // Round Robin has no deciding match, so it is the one type with no Final to format separately.
-  const isRoundRobin = selectedType === 'RoundRobin';
-  const selectedGroupStageKind = watch('groupStageKind');
-  const selectedPlayoffKind = watch('playoffKind');
-  const isGroupStagePlayoff = selectedType === 'GroupStagePlayoff';
-  // A Swiss group stage is one pool, so it has no group count; round-robin groups have no round count.
-  const usesRoundRobinGroups = isGroupStagePlayoff && selectedGroupStageKind === 'RoundRobin';
-  const usesSwissPool = isGroupStagePlayoff && selectedGroupStageKind === 'Swiss';
-  // Third Place belongs to whichever bracket is single elimination - standalone, or a playoff.
-  const playoffIsSingleElimination =
-    selectedType === 'SingleElimination' || (isGroupStagePlayoff && selectedPlayoffKind === 'SingleElimination');
-  // Single Elimination and Round Robin have just one kind of match; Double Elimination and Group
-  // Stage + Playoff instead split it by bracket segment (Upper/Lower/Grand Final, and Group Stage).
-  const showsSingleFormat = selectedType === 'SingleElimination' || selectedType === 'RoundRobin';
-  const usesBracketFormats = selectedType === 'DoubleElimination' || isGroupStagePlayoff;
-  // A single-elimination playoff has no Loser Bracket and no Grand Final, so one picker covers it.
-  const showsAllBracketFormats = selectedType === 'DoubleElimination'
-    || (isGroupStagePlayoff && selectedPlayoffKind === 'DoubleElimination');
-  // Only Round Robin and Group Stage + Playoff produce round-robin standings that can tie in a way that matters.
-  const showsTiebreakerPolicy = selectedType === 'RoundRobin' || isGroupStagePlayoff;
+  const {
+    isGroupStagePlayoff,
+    isRoundRobin,
+    usesRoundRobinGroups,
+    usesSwissPool,
+    playoffIsSingleElimination,
+    showsSingleFormat,
+    usesBracketFormats,
+    showsAllBracketFormats,
+    showsTiebreakerPolicy,
+    showsRules,
+  } = tournamentSettingsShape(selectedType, watch('groupStageKind'), watch('playoffKind'));
 
   // Third Place Match needs a single-elimination bracket; clear it when switching away from one.
   useEffect(() => {
@@ -215,57 +233,61 @@ export function TournamentForm({
 
   return (
     <form onSubmit={submit} noValidate>
-      {/*
-        Two columns on md+ so short controls (Name, Type, format/score pickers) don't stretch across
-        the whole card - Date/Notes/buttons stay full width via gridColumn: '1 / -1'.
-        gridAutoFlow: 'dense' matters here: pinning Third place to column 2 (the last column)
-        advances the browser's auto-placement cursor past the row's end, which wraps to the *next*
-        row before Date's auto-placed search even starts - sparse packing (the grid default) never
-        looks backward to fill the column-1 gap that leaves in Third place's row. Dense packing does.
-      */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gridAutoFlow: 'dense', gap: 3 }}>
-        <TextField
-          label="Name"
-          required
-          {...register('name')}
-          error={Boolean(errors.name)}
-          helperText={errors.name?.message}
-        />
+      <Stack spacing={3}>
+        {/* Everything a tournament always has, so it reads the same whichever type is chosen. */}
+        <FormSection title="Basics">
+          {/* maxLength stops typing at the limit rather than only rejecting it on submit; the schema
+              still enforces the same number, since a paste or an autofill can bypass the attribute. */}
+          <TextField
+            label="Name"
+            required
+            {...register('name')}
+            error={Boolean(errors.name)}
+            helperText={errors.name?.message}
+            slotProps={{ htmlInput: { maxLength: TOURNAMENT_NAME_MAX_LENGTH } }}
+          />
 
-        <Controller
-          name="type"
-          control={control}
-          render={({ field }) => (
-            <TextField select label="Tournament type" {...field}>
-              {tournamentTypes.map((type) => (
-                <MenuItem key={type} value={type}>
-                  {tournamentTypeLabels[type]}
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
-        />
+          <TextField
+            label="Date"
+            type="date"
+            required
+            slotProps={{ inputLabel: { shrink: true } }}
+            {...register('date')}
+            error={Boolean(errors.date)}
+            helperText={errors.date?.message}
+          />
 
-        {showsSingleFormat && (
-          <FormatPicker name="defaultMatchFormat" label="Match format" control={control} options={decisiveFormats} />
-        )}
+          <Controller
+            name="type"
+            control={control}
+            render={({ field }) => (
+              <TextField select label="Tournament type" {...field}>
+                {tournamentTypes.map((type) => (
+                  <MenuItem key={type} value={type}>
+                    {tournamentTypeLabels[type]}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+          />
 
-        <Controller
-          name="defaultScoreType"
-          control={control}
-          render={({ field }) => (
-            <TextField select label="Default score type" {...field}>
-              {scoreTypes.map((type) => (
-                <MenuItem key={type} value={type}>
-                  {scoreTypeLabels[type]}
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
-        />
+          <Controller
+            name="defaultScoreType"
+            control={control}
+            render={({ field }) => (
+              <TextField select label="Default score type" {...field}>
+                {scoreTypes.map((type) => (
+                  <MenuItem key={type} value={type}>
+                    {scoreTypeLabels[type]}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+          />
+        </FormSection>
 
         {isGroupStagePlayoff && (
-          <>
+          <FormSection title="Structure">
             <Controller
               name="groupStageKind"
               control={control}
@@ -292,144 +314,141 @@ export function TournamentForm({
                 </TextField>
               )}
             />
-          </>
-        )}
 
-        {usesRoundRobinGroups && (
-          <TextField
-            label="Number of groups"
-            type="number"
-            required
-            slotProps={{ htmlInput: { min: 2, max: 16, inputMode: 'numeric' } }}
-            {...register('groupCount', { valueAsNumber: true })}
-            error={Boolean(errors.groupCount)}
-            helperText={
-              errors.groupCount?.message ??
-              'Participants are drawn randomly into this many groups; sizes may differ by one.'
-            }
-          />
-        )}
-
-        {usesSwissPool && (
-          <TextField
-            label="Swiss rounds"
-            type="number"
-            required
-            slotProps={{ htmlInput: { min: 0, max: 31, inputMode: 'numeric' } }}
-            {...register('swissRounds', { valueAsNumber: true })}
-            error={Boolean(errors.swissRounds)}
-            helperText={
-              errors.swissRounds?.message ??
-              '0 picks enough rounds to leave one undefeated leader. Each round is paired from the standings once the previous one is decided.'
-            }
-          />
-        )}
-
-        {isGroupStagePlayoff && (
-          <Controller
-            name="playoffSize"
-            control={control}
-            render={({ field }) => (
+            {usesRoundRobinGroups && (
               <TextField
-                select
-                label="Playoff size"
-                {...field}
-                onChange={(e) => field.onChange(Number(e.target.value))}
-                helperText="How many qualify. Auto takes the largest that fits the roster; the rest are knocked out at the group stage."
-              >
-                {playoffSizes.map((size) => (
-                  <MenuItem key={size} value={size}>
-                    {size === 0 ? 'Auto (largest that fits)' : size}
-                  </MenuItem>
-                ))}
-              </TextField>
+                label="Number of groups"
+                type="number"
+                required
+                slotProps={{ htmlInput: { min: 2, max: 16, inputMode: 'numeric' } }}
+                {...register('groupCount', { valueAsNumber: true })}
+                error={Boolean(errors.groupCount)}
+                helperText={
+                  errors.groupCount?.message ??
+                  'Participants are drawn randomly into this many groups; sizes may differ by one.'
+                }
+              />
             )}
-          />
+
+            {usesSwissPool && (
+              <TextField
+                label="Swiss rounds"
+                type="number"
+                required
+                slotProps={{ htmlInput: { min: 0, max: 31, inputMode: 'numeric' } }}
+                {...register('swissRounds', { valueAsNumber: true })}
+                error={Boolean(errors.swissRounds)}
+                helperText={
+                  errors.swissRounds?.message ??
+                  '0 picks enough rounds to leave one undefeated leader. Each round is paired from the standings once the previous one is decided.'
+                }
+              />
+            )}
+
+            <Controller
+              name="playoffSize"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  select
+                  label="Playoff size"
+                  {...field}
+                  onChange={(e) => field.onChange(Number(e.target.value))}
+                  helperText="How many qualify. Auto takes the largest that fits the roster; the rest are knocked out at the group stage."
+                >
+                  {playoffSizes.map((size) => (
+                    <MenuItem key={size} value={size}>
+                      {size === 0 ? 'Auto (largest that fits)' : size}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+            />
+          </FormSection>
         )}
 
-        {isGroupStagePlayoff && (
-          <FormatPicker
-            name="groupStageMatchFormat"
-            label="Group stage match format"
-            control={control}
-            options={usesSwissPool ? decisiveFormats : groupStageMatchFormats}
-            helperText={
-              usesSwissPool
-                ? 'A Swiss pool ranks on match wins, so it needs a decisive format.'
-                : 'Best of 2 plays two games per pair (a 1-1 is a draw) and ranks groups by total games won.'
-            }
-          />
-        )}
+        {/* Never empty: every type has at least one match to format. */}
+        <FormSection title="Match formats">
+          {showsSingleFormat && (
+            <FormatPicker name="defaultMatchFormat" label="Match format" control={control} options={decisiveFormats} />
+          )}
 
-        {/* A single-elimination playoff has one bracket, so the same picker just changes its label. */}
-        {usesBracketFormats && (
-          <FormatPicker
-            name="upperBracketFormat"
-            label={showsAllBracketFormats ? 'Upper bracket format' : 'Playoff match format'}
-            control={control}
-            options={decisiveFormats}
-          />
-        )}
-
-        {showsAllBracketFormats && (
-          <FormatPicker name="lowerBracketFormat" label="Lower bracket format" control={control} options={decisiveFormats} />
-        )}
-
-        {/* Every elimination shape ends on one deciding match that can be played longer than the rest. */}
-        {!isRoundRobin && (
-          <FormatPicker
-            name="grandFinalFormat"
-            label={showsAllBracketFormats ? 'Grand Final format' : 'Final format'}
-            control={control}
-            options={decisiveFormats}
-          />
-        )}
-
-        <Controller
-          name="thirdPlaceEnabled"
-          control={control}
-          render={({ field }) => (
-            <FormControlLabel
-              control={<Checkbox checked={field.value} onChange={field.onChange} disabled={!playoffIsSingleElimination} />}
-              label="Third place match (Single Elimination only)"
-              // Pinned to column 2 (rather than left to grid auto-flow) so it doesn't jump into
-              // column 1 whenever "Number of groups" above it is absent (non-GSP tournaments).
-              sx={{ gridColumn: { xs: '1 / -1', md: '2' } }}
+          {isGroupStagePlayoff && (
+            <FormatPicker
+              name="groupStageMatchFormat"
+              label="Group stage match format"
+              control={control}
+              options={usesSwissPool ? decisiveFormats : groupStageMatchFormats}
+              helperText={
+                usesSwissPool
+                  ? 'A Swiss pool ranks on match wins, so it needs a decisive format.'
+                  : 'Best of 2 plays two games per pair (a 1-1 is a draw) and ranks groups by total games won.'
+              }
             />
           )}
-        />
 
-        {showsTiebreakerPolicy && (
-          <Controller
-            name="tiebreakerPolicy"
-            control={control}
-            render={({ field }) => (
-              <TextField
-                select
-                label="Tie-breaker"
-                {...field}
-                sx={{ gridColumn: '1 / -1' }}
-                helperText="How a standings tie that changes an outcome (who qualifies, which bracket they enter, or a podium place) is resolved."
-              >
-                {tiebreakerPolicies.map((policy) => (
-                  <MenuItem key={policy} value={policy}>
-                    {tiebreakerPolicyLabels[policy]}
-                  </MenuItem>
-                ))}
-              </TextField>
+          {/* A single-elimination playoff has one bracket, so the same picker just changes its label. */}
+          {usesBracketFormats && (
+            <FormatPicker
+              name="upperBracketFormat"
+              label={showsAllBracketFormats ? 'Upper bracket format' : 'Playoff match format'}
+              control={control}
+              options={decisiveFormats}
+            />
+          )}
+
+          {showsAllBracketFormats && (
+            <FormatPicker name="lowerBracketFormat" label="Lower bracket format" control={control} options={decisiveFormats} />
+          )}
+
+          {/* Every elimination shape ends on one deciding match that can be played longer than the rest. */}
+          {!isRoundRobin && (
+            <FormatPicker
+              name="grandFinalFormat"
+              label={showsAllBracketFormats ? 'Grand Final format' : 'Final format'}
+              control={control}
+              options={decisiveFormats}
+            />
+          )}
+        </FormSection>
+
+        {showsRules && (
+          <FormSection title="Rules">
+            {playoffIsSingleElimination && (
+              <Controller
+                name="thirdPlaceEnabled"
+                control={control}
+                render={({ field }) => (
+                  <FormControlLabel
+                    control={<Checkbox checked={field.value} onChange={field.onChange} />}
+                    label="Third place match"
+                  />
+                )}
+              />
             )}
-          />
-        )}
 
-        <TextField
-          label="Date"
-          type="date"
-          required
-          slotProps={{ inputLabel: { shrink: true } }}
-          {...register('date')}
-          error={Boolean(errors.date)}
-          helperText={errors.date?.message}
-        />
+            {showsTiebreakerPolicy && (
+              <Controller
+                name="tiebreakerPolicy"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    select
+                    label="Tie-breaker"
+                    {...field}
+                    helperText="How a standings tie that changes an outcome (who qualifies, which bracket they enter, or a podium place) is resolved."
+                  >
+                    {tiebreakerPolicies.map((policy) => (
+                      <MenuItem key={policy} value={policy}>
+                        {tiebreakerPolicyLabels[policy]}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                )}
+              />
+            )}
+          </FormSection>
+        )}
 
         <TextField
           label="Notes"
@@ -438,10 +457,9 @@ export function TournamentForm({
           {...register('notes')}
           error={Boolean(errors.notes)}
           helperText={errors.notes?.message}
-          sx={{ gridColumn: '1 / -1' }}
         />
 
-        <Stack direction="row" spacing={2} sx={{ gridColumn: '1 / -1' }}>
+        <Stack direction="row" spacing={2}>
           <Button type="submit" variant="contained" disabled={submitting}>
             {submitLabel}
           </Button>
@@ -451,7 +469,7 @@ export function TournamentForm({
             </Button>
           )}
         </Stack>
-      </Box>
+      </Stack>
     </form>
   );
 }

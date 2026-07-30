@@ -21,12 +21,22 @@ import CasinoIcon from '@mui/icons-material/Casino';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { generateBracket, listParticipants, startTournament, updateBracket } from '../api/tournaments';
 import type { Participant, TournamentType } from '../api/types';
-import { requiredByes } from '../api/types';
+import { MIN_PARTICIPANTS, requiredByes } from '../api/types';
 import { extractErrorMessage } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ParticipantLabel } from './ParticipantLabel';
+import { RosterUnsavedNotice } from './RosterUnsavedNotice';
 
-export function BracketPreview({ tournamentId, tournamentType }: { tournamentId: string; tournamentType: TournamentType }) {
+export function BracketPreview({
+  tournamentId,
+  tournamentType,
+  rosterUnsaved = false,
+}: {
+  tournamentId: string;
+  tournamentType: TournamentType;
+  /** True while the participants section holds roster edits that have not been saved. */
+  rosterUnsaved?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Participant[]>([]);
@@ -137,9 +147,11 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
   };
 
   const byesValid = byes.size === required;
-  const canStart = seeded && !dirty && byesValid;
+  // Seeding an unsaved roster would place participants who are about to be renamed, added or removed.
+  const canStart = seeded && !dirty && byesValid && !rosterUnsaved;
+  const canSeed = !generateMutation.isPending && !rosterUnsaved;
 
-  if (participants.length < 2) {
+  if (participants.length < MIN_PARTICIPANTS) {
     return null;
   }
 
@@ -172,10 +184,11 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
               variant="contained"
               startIcon={<CasinoIcon />}
               onClick={() => generateMutation.mutate()}
-              disabled={generateMutation.isPending}
+              disabled={!canSeed}
             >
               Generate bracket
             </Button>
+            {rosterUnsaved && <RosterUnsavedNotice />}
           </Stack>
         ) : (
           <Stack spacing={2}>
@@ -223,11 +236,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
             </List>
 
             <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-              <Button
-                startIcon={<CasinoIcon />}
-                onClick={() => generateMutation.mutate()}
-                disabled={generateMutation.isPending}
-              >
+              <Button startIcon={<CasinoIcon />} onClick={() => generateMutation.mutate()} disabled={!canSeed}>
                 Regenerate
               </Button>
               <Button
@@ -248,6 +257,7 @@ export function BracketPreview({ tournamentId, tournamentType }: { tournamentId:
               </Button>
             </Stack>
 
+            {rosterUnsaved && <RosterUnsavedNotice />}
             {dirty && (
               <Typography variant="body2" color="warning.main">
                 You have unsaved changes. Save the preview before starting.

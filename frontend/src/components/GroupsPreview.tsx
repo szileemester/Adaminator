@@ -4,13 +4,23 @@ import { Alert, Box, Button, Card, CardContent, Stack, Typography } from '@mui/m
 import CasinoIcon from '@mui/icons-material/Casino';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { drawGroups, listParticipants, startTournament } from '../api/tournaments';
-import { groupLabel } from '../api/types';
+import { groupLabel, MIN_PARTICIPANTS } from '../api/types';
 import { extractErrorMessage } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ParticipantLabel } from './ParticipantLabel';
+import { RosterUnsavedNotice } from './RosterUnsavedNotice';
 
 /** Group Stage + Playoff pre-start flow: random group draw (redraw-able) then start. */
-export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: string; groupCount: number }) {
+export function GroupsPreview({
+  tournamentId,
+  groupCount,
+  rosterUnsaved = false,
+}: {
+  tournamentId: string;
+  groupCount: number;
+  /** True while the participants section holds roster edits that have not been saved. */
+  rosterUnsaved?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [confirmStart, setConfirmStart] = useState(false);
@@ -44,9 +54,12 @@ export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: stri
     },
   });
 
-  if (participants.length < 2) {
+  if (participants.length < MIN_PARTICIPANTS) {
     return null;
   }
+
+  // Named once, like BracketPreview's canSeed, so the three controls can't drift apart.
+  const canDraw = !drawMutation.isPending && !rosterUnsaved;
 
   const groups = Array.from({ length: groupCount }, (_, g) =>
     participants.filter((p) => p.groupIndex === g).sort((a, b) => a.seed - b.seed),
@@ -74,10 +87,11 @@ export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: stri
               variant="contained"
               startIcon={<CasinoIcon />}
               onClick={() => drawMutation.mutate()}
-              disabled={drawMutation.isPending}
+              disabled={!canDraw}
             >
               Draw groups
             </Button>
+            {rosterUnsaved && <RosterUnsavedNotice />}
           </Stack>
         ) : (
           <Stack spacing={2}>
@@ -104,7 +118,11 @@ export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: stri
             </Box>
 
             <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-              <Button startIcon={<CasinoIcon />} onClick={() => drawMutation.mutate()} disabled={drawMutation.isPending}>
+              <Button
+                startIcon={<CasinoIcon />}
+                onClick={() => drawMutation.mutate()}
+                disabled={!canDraw}
+              >
                 Redraw
               </Button>
               <Button
@@ -112,10 +130,12 @@ export function GroupsPreview({ tournamentId, groupCount }: { tournamentId: stri
                 color="success"
                 startIcon={<PlayArrowIcon />}
                 onClick={() => setConfirmStart(true)}
+                disabled={rosterUnsaved}
               >
                 Start tournament
               </Button>
             </Stack>
+            {rosterUnsaved && <RosterUnsavedNotice />}
           </Stack>
         )}
 

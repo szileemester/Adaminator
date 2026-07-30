@@ -39,3 +39,14 @@ export const theme = createTheme({
     },
   },
 });
+
+/**
+ * Lets a run of text break mid-word. Free-text names routinely arrive with no spaces at all
+ * ("aaaaaaaa..."), and normal word wrapping has nowhere to go in one - it overflows instead. The
+ * `minWidth: 0` is the flexbox half of the same problem: such a name in a flex row keeps its default
+ * `min-width: auto` and pushes its siblings off-screen rather than wrapping.
+ *
+ * Here rather than in a component because every surface rendering a user-supplied name needs both
+ * halves, and each one that re-derived them got only one - or forgot entirely.
+ */
+export const breakAnywhereSx = { overflowWrap: 'anywhere', minWidth: 0 } as const;

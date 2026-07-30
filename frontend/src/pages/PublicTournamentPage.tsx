@@ -5,6 +5,7 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getPublicTournament } from '../api/tournaments';
 import { formatParticipantName, matchFormatLabels, scoreTypeLabels, tournamentTypeLabels } from '../api/types';
 import { StatusChip } from '../components/StatusChip';
+import { TournamentTitle } from '../components/TournamentTitle';
 import { BracketView } from '../components/BracketView';
 import { extractErrorMessage } from '../api/client';
 
@@ -37,7 +38,7 @@ export function PublicTournamentPage() {
             <CardContent>
               <Stack spacing={2}>
                 <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                  <Typography variant="h4">{data.name}</Typography>
+                  <TournamentTitle name={data.name} />
                   <StatusChip status={data.status} />
                 </Stack>
                 <Stack spacing={1.5} divider={<Divider flexItem />}>

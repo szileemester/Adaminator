@@ -92,6 +92,8 @@ public record TournamentDto(
     int PlayoffCapacity,
     /// <summary>The Swiss round count actually in force, with 0 resolved against the current roster.</summary>
     int ResolvedSwissRounds,
+    /// <summary>Fewest participants these settings can start with, so the roster editor need not restate the rule.</summary>
+    int MinParticipants,
     TournamentStatus Status,
     string PublicToken,
     DateTimeOffset CreatedAt);

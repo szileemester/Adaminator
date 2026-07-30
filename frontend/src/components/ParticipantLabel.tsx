@@ -15,6 +15,7 @@ export function ParticipantLabel({
   emoji,
   sx,
   pending = false,
+  align = 'start',
 }: {
   name: string;
   emoji: string | null | undefined;
@@ -25,10 +26,21 @@ export function ParticipantLabel({
    * the label alone.
    */
   pending?: boolean;
+  /**
+   * `end` mirrors the label for the right-hand side of a fixture: the pair sits against the right
+   * edge with the emoji outermost, so the two competitors face each other across the score the way a
+   * scoreboard reads. Row-reverse does both jobs at once - it flips the order, and its main-start is
+   * the right edge, so the default packing right-aligns the pair.
+   */
+  align?: 'start' | 'end';
 }) {
   return (
     // Spacing stays tight everywhere so the 168px bracket cards, the narrowest site, need no special case.
-    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', minWidth: 0 }}>
+    <Stack
+      direction={align === 'end' ? 'row-reverse' : 'row'}
+      spacing={0.5}
+      sx={{ alignItems: 'center', minWidth: 0 }}
+    >
       {!pending && (
         <Typography component="span" aria-hidden sx={{ fontSize: '1rem', lineHeight: 1, flexShrink: 0 }}>
           {emoji ?? DEFAULT_PARTICIPANT_EMOJI}

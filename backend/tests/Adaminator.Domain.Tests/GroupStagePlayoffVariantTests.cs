@@ -17,6 +17,71 @@ public class GroupStagePlayoffVariantTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 7, 26, 10, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Now = new(2026, 7, 26, 12, 0, 0, TimeSpan.Zero);
 
+    // ---- MinParticipantsToStart ----
+    //
+    // The roster editor floors its player count here, so this has to agree with what Start actually
+    // rejects. Each case below builds the smallest roster the property allows and asserts it starts,
+    // then one fewer and asserts it doesn't - a floor that is too low would let an admin build a
+    // roster the tournament refuses, and one too high would block a legal one.
+
+    [Theory]
+    [InlineData(TournamentType.SingleElimination, 2)]
+    [InlineData(TournamentType.DoubleElimination, 2)]
+    [InlineData(TournamentType.RoundRobin, 2)]
+    public void A_plain_type_can_start_with_two(TournamentType type, int expected)
+    {
+        var tournament = Tournament.Create(
+            "Cup", Date, null, type, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt);
+
+        tournament.MinParticipantsToStart.Should().Be(expected);
+    }
+
+    [Theory]
+    // groups x 2, floored at the smallest playoff
+    [InlineData(2, 0, 0, GroupStageKind.RoundRobin, 4)]
+    [InlineData(4, 0, 0, GroupStageKind.RoundRobin, 8)]
+    [InlineData(6, 0, 0, GroupStageKind.RoundRobin, 12)]
+    // an explicitly chosen playoff cut needs a roster that fills it
+    [InlineData(2, 8, 0, GroupStageKind.RoundRobin, 8)]
+    [InlineData(2, 16, 0, GroupStageKind.RoundRobin, 16)]
+    // Swiss has no groups; only the cut and the round count raise the floor
+    [InlineData(0, 0, 0, GroupStageKind.Swiss, 4)]
+    [InlineData(0, 16, 0, GroupStageKind.Swiss, 16)]
+    [InlineData(0, 0, 6, GroupStageKind.Swiss, 7)]
+    public void Group_stage_playoff_reports_the_highest_floor_its_settings_impose(
+        int groupCount, int playoffSize, int swissRounds, GroupStageKind kind, int expected)
+    {
+        var tournament = Tournament.Create(
+            "Major", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt,
+            groupCount: groupCount, groupStageKind: kind, playoffSize: playoffSize, swissRounds: swissRounds);
+
+        tournament.MinParticipantsToStart.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// The property's whole purpose: a roster of exactly this size must start. The frontend's previous
+    /// hand-written mirror said 4 here and let an admin build a roster Start then refused.
+    /// </summary>
+    [Fact]
+    public void A_roster_of_exactly_the_minimum_starts_even_with_an_explicit_playoff_cut()
+    {
+        var tournament = Planned(participantCount: 16, playoffSize: 16);
+        tournament.DrawGroups();
+
+        tournament.MinParticipantsToStart.Should().Be(16);
+        tournament.Invoking(t => t.Start()).Should().NotThrow();
+    }
+
+    [Fact]
+    public void One_below_the_reported_minimum_is_refused_by_Start()
+    {
+        var tournament = Planned(participantCount: 15, playoffSize: 16);
+        tournament.DrawGroups();
+
+        tournament.Invoking(t => t.Start())
+            .Should().Throw<DomainException>().WithMessage("*playoff of 16 needs at least 16*");
+    }
+
     private static Tournament Planned(
         int participantCount,
         GroupStageKind groupStageKind = GroupStageKind.RoundRobin,

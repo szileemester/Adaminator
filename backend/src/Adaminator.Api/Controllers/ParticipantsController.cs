@@ -30,6 +30,14 @@ public class ParticipantsController : ControllerBase
         return Ok(participant);
     }
 
+    /// <summary>Replaces the whole roster in one transaction. See <see cref="ParticipantService.ReplaceAsync"/>.</summary>
+    [HttpPut]
+    public async Task<ActionResult<IReadOnlyList<ParticipantDto>>> Replace(Guid tournamentId, [FromBody] ReplaceRosterRequest request, CancellationToken cancellationToken)
+    {
+        var participants = await _service.ReplaceAsync(tournamentId, request, cancellationToken);
+        return Ok(participants);
+    }
+
     [HttpPut("{participantId:guid}")]
     public async Task<ActionResult<ParticipantDto>> Update(Guid tournamentId, Guid participantId, [FromBody] UpdateParticipantRequest request, CancellationToken cancellationToken)
     {

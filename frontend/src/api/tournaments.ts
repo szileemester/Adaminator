@@ -49,24 +49,21 @@ export async function listParticipants(tournamentId: string): Promise<Participan
   return data;
 }
 
-export async function addParticipant(tournamentId: string, name: string, emoji: string | null = null): Promise<Participant> {
-  const { data } = await apiClient.post(`/api/tournaments/${tournamentId}/participants`, { name, emoji });
-  return data;
+/** One row of a roster being committed. A null `id` is someone new; the array order becomes the roster order. */
+export interface RosterEntry {
+  id: string | null;
+  name: string;
+  emoji: string | null;
 }
 
-/** Carries the emoji alongside the name; re-sending the stored one is a no-op server-side, changing it is rejected. */
-export async function updateParticipant(
-  tournamentId: string,
-  participantId: string,
-  name: string,
-  emoji: string | null = null,
-): Promise<Participant> {
-  const { data } = await apiClient.put(`/api/tournaments/${tournamentId}/participants/${participantId}`, { name, emoji });
+/**
+ * Commits the whole roster in one request: entries with an id are kept and updated, entries without
+ * one are created, and anyone absent is removed. The roster editor edits every panel locally and
+ * saves them together, so this matches it - one round trip, one transaction, all-or-nothing.
+ */
+export async function replaceRoster(tournamentId: string, participants: RosterEntry[]): Promise<Participant[]> {
+  const { data } = await apiClient.put(`/api/tournaments/${tournamentId}/participants`, { participants });
   return data;
-}
-
-export async function removeParticipant(tournamentId: string, participantId: string): Promise<void> {
-  await apiClient.delete(`/api/tournaments/${tournamentId}/participants/${participantId}`);
 }
 
 // ---- Bracket ----

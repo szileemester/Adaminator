@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
+  Box,
   Button,
   Dialog,
   DialogActions,
@@ -19,6 +20,7 @@ import { completeMatch, forfeitMatch, saveMatchResult, undoMatch } from '../api/
 import type { ScoreEntryInput } from '../api/matches';
 import { extractErrorMessage } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
+import { breakAnywhereSx } from '../theme';
 
 /** One game slot's in-progress state - `participantAWon: null` means "not yet decided", distinct from the boolean the API wire format requires once a game is actually played. */
 interface GameSlot {
@@ -27,7 +29,16 @@ interface GameSlot {
   participantAWon: boolean | null;
 }
 
-const blankSlot = (): GameSlot => ({ scoreA: null, scoreB: null, participantAWon: null });
+/**
+ * An untouched game. A Points match opens at 0-0 rather than empty: an empty numeric field parks the
+ * participant's name inside the box where the score belongs, which reads as a value. 0-0 still counts
+ * as "not entered" to `computeGameProgress`, since a tie can never be a final score. A Games match
+ * has no scores at all - only who won.
+ */
+const blankSlot = (scoreType: ScoreType): GameSlot =>
+  scoreType === 'Points'
+    ? { scoreA: 0, scoreB: 0, participantAWon: null }
+    : { scoreA: null, scoreB: null, participantAWon: null };
 
 /**
  * Winner implied by a game's scores once both are entered, otherwise whatever was already selected
@@ -85,6 +96,66 @@ function computeGameProgress(
   const enabledCount = drawCapable ? maxGames : decisive ? filledCount : Math.min(filledCount + 1, maxGames);
 
   return { played, playedWinsA, playedWinsB, canComplete, enabledCount };
+}
+
+/**
+ * Clip a single line and mark the cut with an ellipsis. Used by both places in this dialog that put a
+ * participant name inside a control - the button labels and the score fields' floating labels - which
+ * fail the same way for the same reason, so they share the recipe.
+ */
+const ELLIPSIS_SX = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
+
+/**
+ * A control's label that gives up its tail rather than its container's width. A participant name runs
+ * to 30 characters and several labels here embed one ("<name> won", "Forfeit: <name> wins"); left to
+ * size themselves they push the dialog wider than the screen. The emoji and opening characters are the
+ * identifying part, so the tail is what goes.
+ */
+function TruncatedLabel({ children }: { children: ReactNode }) {
+  return (
+    <Box component="span" sx={{ minWidth: 0, ...ELLIPSIS_SX }}>
+      {children}
+    </Box>
+  );
+}
+
+/**
+ * One participant's score for one game. Emptying the field mid-edit is allowed - typing over a value
+ * shouldn't fight the input - but it snaps back to 0 on blur, so a field is never left showing its
+ * label where a number should be.
+ */
+function PointsScoreField({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  disabled: boolean;
+  onChange: (score: number | null) => void;
+}) {
+  return (
+    <TextField
+      size="small"
+      type="number"
+      label={label}
+      value={value ?? ''}
+      disabled={disabled}
+      // The label is a participant name, so the field shares the row rather than staying at its
+      // natural width - and the label still truncates, since 30 characters outrun any sane field.
+      sx={{
+        flex: 1,
+        minWidth: 90,
+        maxWidth: 180,
+        '& .MuiInputLabel-root': { maxWidth: 'calc(100% - 24px)', ...ELLIPSIS_SX },
+      }}
+      slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => onChange(parseScore(e.target.value))}
+      onBlur={() => value === null && onChange(0)}
+    />
+  );
 }
 
 interface MatchResultDialogProps {
@@ -185,7 +256,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
   // results (e.g. game 4's stale "A" after game 3 changes from B to A) are no longer meaningful and
   // must be re-entered rather than silently carried over.
   const updateEntry = (index: number, patch: Partial<GameSlot>) => {
-    setEntries((prev) => [...prev.slice(0, index), { ...(prev[index] ?? blankSlot()), ...patch }]);
+    setEntries((prev) => [...prev.slice(0, index), { ...(prev[index] ?? blankSlot(scoreType)), ...patch }]);
     setDirty(true);
   };
 
@@ -204,11 +275,12 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
 
   return (
     <Dialog open onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
+      <DialogTitle sx={breakAnywhereSx}>
         {nameA} vs {nameB}
       </DialogTitle>
       <DialogContent>
-        <Stack spacing={2} sx={{ mt: 1 }}>
+        {/* Applied once here rather than on each line: every piece of prose below embeds a name. */}
+        <Stack spacing={2} sx={{ mt: 1, ...breakAnywhereSx }}>
           {error && (
             <Alert severity="error" onClose={() => setError(null)}>
               {error}
@@ -226,6 +298,28 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
               <Typography variant="body2">
                 {match.winnerId === null ? 'Draw' : `Winner: ${match.winnerId === match.participantA?.participantId ? nameA : nameB}`}
               </Typography>
+              {/*
+                The headline is games won, which is all the bracket shows. For a Points match that
+                hides the actual scores, so list them per game - this dialog is the one place they
+                are recorded.
+              */}
+              {scoreType === 'Points' && match.entries.length > 0 && (
+                <Stack spacing={0.5} sx={{ pt: 1 }}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Points per game
+                  </Typography>
+                  {match.entries.map((entry, index) => (
+                    <Stack key={index} direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 56 }}>
+                        Game {index + 1}
+                      </Typography>
+                      <Typography variant="body2">
+                        {nameA} {entry.scoreA ?? '-'} – {entry.scoreB ?? '-'} {nameB}
+                      </Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
             </Stack>
           ) : (
             <>
@@ -239,7 +333,7 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
               </Stack>
 
               <Stack spacing={1}>
-                {Array.from({ length: maxGames }, (_, index) => entries[index] ?? blankSlot()).map((slot, index) => {
+                {Array.from({ length: maxGames }, (_, index) => entries[index] ?? blankSlot(scoreType)).map((slot, index) => {
                   const enabled = index < enabledCount;
                   return (
                     <Stack key={index} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -248,47 +342,44 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
                       </Typography>
                       {scoreType === 'Points' ? (
                         <>
-                          <TextField
-                            size="small"
-                            type="number"
+                          <PointsScoreField
                             label={nameA}
-                            value={slot.scoreA ?? ''}
+                            value={slot.scoreA}
                             disabled={!enabled}
-                            sx={{ width: 90 }}
-                            slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
-                            onFocus={(e) => e.target.select()}
-                            onChange={(e) => {
-                              const scoreA = parseScore(e.target.value);
-                              updateEntry(index, { scoreA, participantAWon: deriveWinner(scoreA, slot.scoreB, slot.participantAWon) });
-                            }}
+                            onChange={(scoreA) =>
+                              updateEntry(index, {
+                                scoreA,
+                                participantAWon: deriveWinner(scoreA, slot.scoreB, slot.participantAWon),
+                              })
+                            }
                           />
-                          <TextField
-                            size="small"
-                            type="number"
+                          <PointsScoreField
                             label={nameB}
-                            value={slot.scoreB ?? ''}
+                            value={slot.scoreB}
                             disabled={!enabled}
-                            sx={{ width: 90 }}
-                            slotProps={{ htmlInput: { inputMode: 'numeric', pattern: '[0-9]*' } }}
-                            onFocus={(e) => e.target.select()}
-                            onChange={(e) => {
-                              const scoreB = parseScore(e.target.value);
-                              updateEntry(index, { scoreB, participantAWon: deriveWinner(slot.scoreA, scoreB, slot.participantAWon) });
-                            }}
+                            onChange={(scoreB) =>
+                              updateEntry(index, {
+                                scoreB,
+                                participantAWon: deriveWinner(slot.scoreA, scoreB, slot.participantAWon),
+                              })
+                            }
                           />
                         </>
                       ) : (
+                        // Splits the space left beside the "Game n" label evenly instead of sizing to
+                        // the two names, so the pair always fits the dialog whatever they are called.
                         <ToggleButtonGroup
                           size="small"
                           exclusive
                           value={slot.participantAWon}
                           onChange={(_, value) => updateEntry(index, { participantAWon: value })}
+                          sx={{ flexGrow: 1, minWidth: 0 }}
                         >
-                          <ToggleButton value={true} disabled={!enabled}>
-                            {nameA} won
+                          <ToggleButton value={true} disabled={!enabled} sx={{ flex: 1, minWidth: 0 }}>
+                            <TruncatedLabel>{nameA} won</TruncatedLabel>
                           </ToggleButton>
-                          <ToggleButton value={false} disabled={!enabled}>
-                            {nameB} won
+                          <ToggleButton value={false} disabled={!enabled} sx={{ flex: 1, minWidth: 0 }}>
+                            <TruncatedLabel>{nameB} won</TruncatedLabel>
                           </ToggleButton>
                         </ToggleButtonGroup>
                       )}
@@ -305,12 +396,22 @@ export function MatchResultDialog({ tournamentId, match, onClose }: MatchResultD
               </Typography>
 
               {match.participantA && match.participantB && (
-                <Stack direction="row" spacing={1}>
-                  <Button size="small" color="warning" onClick={() => setForfeitWinnerId(match.participantA!.participantId)}>
-                    Forfeit: {nameA} wins
+                <Stack direction="row" spacing={1} sx={{ minWidth: 0 }}>
+                  <Button
+                    size="small"
+                    color="warning"
+                    sx={{ flex: 1, minWidth: 0 }}
+                    onClick={() => setForfeitWinnerId(match.participantA!.participantId)}
+                  >
+                    <TruncatedLabel>Forfeit: {nameA} wins</TruncatedLabel>
                   </Button>
-                  <Button size="small" color="warning" onClick={() => setForfeitWinnerId(match.participantB!.participantId)}>
-                    Forfeit: {nameB} wins
+                  <Button
+                    size="small"
+                    color="warning"
+                    sx={{ flex: 1, minWidth: 0 }}
+                    onClick={() => setForfeitWinnerId(match.participantB!.participantId)}
+                  >
+                    <TruncatedLabel>Forfeit: {nameB} wins</TruncatedLabel>
                   </Button>
                 </Stack>
               )}

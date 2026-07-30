@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -15,7 +16,6 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { SxProps, Theme } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -40,9 +40,13 @@ import {
   matchFormatLabels,
   playoffKindLabels,
   scoreTypeLabels,
+  tiebreakerPolicyLabels,
+  tournamentSettingsShape,
   tournamentTypeLabels,
 } from '../api/types';
+import { SectionHeading } from '../components/SectionHeading';
 import { StatusChip } from '../components/StatusChip';
+import { TournamentTitle } from '../components/TournamentTitle';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ParticipantsSection } from '../components/ParticipantsSection';
 import { BracketPreview } from '../components/BracketPreview';
@@ -64,6 +68,9 @@ export function TournamentDetailPage() {
   // Set when a bracket action creates a stage's matches, so the view below jumps to that tab.
   const [focusStage, setFocusStage] = useState<FocusStage | null>(null);
   const [overviewOpen, setOverviewOpen] = useState(false);
+  // Raised by the participants section while its panels differ from the saved roster, so seeding and
+  // starting can't run against a roster that is about to change.
+  const [rosterUnsaved, setRosterUnsaved] = useState(false);
 
   const { data: tournament, isLoading, isError, error } = useQuery({
     queryKey: ['tournaments', id],
@@ -136,6 +143,8 @@ export function TournamentDetailPage() {
   }
 
   const publicUrl = `${window.location.origin}/public/${tournament.publicToken}`;
+  // The same rules the create form uses, so the Overview reports exactly the settings it offered.
+  const shape = tournamentSettingsShape(tournament.type, tournament.groupStageKind, tournament.playoffKind);
 
   const copyPublicLink = async () => {
     await navigator.clipboard.writeText(publicUrl);
@@ -145,8 +154,8 @@ export function TournamentDetailPage() {
   return (
     <Stack spacing={3}>
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-          <Typography variant="h4">{tournament.name}</Typography>
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center', minWidth: 0, flexShrink: 1 }}>
+          <TournamentTitle name={tournament.name} />
           <StatusChip status={tournament.status} />
         </Stack>
         <Stack direction="row" spacing={1}>
@@ -172,72 +181,134 @@ export function TournamentDetailPage() {
       */}
       <Card>
         <CardContent>
+          {/*
+            Full width with the chevron pushed to the far edge, so the whole header row toggles - a
+            button sized to just the word is a needle to hit, and the row reads as clickable anyway.
+            MUI's default hover tint is left in place as the affordance that it is one.
+          */}
           <Button
             onClick={() => setOverviewOpen((open) => !open)}
             endIcon={overviewOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
             color="inherit"
             aria-expanded={overviewOpen}
-            sx={{ p: 0, minWidth: 0, textTransform: 'none', '&:hover': { bgcolor: 'transparent' } }}
+            fullWidth
+            sx={{ p: 0, textTransform: 'none', justifyContent: 'space-between' }}
           >
             <Typography variant="h6">Overview</Typography>
           </Button>
           {/* unmountOnExit: collapsed is the default, so there is no reason to keep a dozen rows
               mounted and re-rendering for content nobody has asked to see. */}
           <Collapse in={overviewOpen} unmountOnExit>
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
-                columnGap: 4,
-                rowGap: 1.5,
-                mt: 2,
-              }}
-            >
-            <DetailRow label="Date" value={tournament.date} />
-            <DetailRow label="Type" value={tournamentTypeLabels[tournament.type]} />
-            {tournament.type === 'GroupStagePlayoff' && (
-              <>
-                <DetailRow label="Group stage" value={groupStageKindLabels[tournament.groupStageKind]} />
-                <DetailRow label="Playoff" value={playoffKindLabels[tournament.playoffKind]} />
-                {tournament.groupStageKind === 'RoundRobin' ? (
-                  <DetailRow label="Groups" value={String(tournament.groupCount)} />
-                ) : (
-                  <DetailRow label="Swiss rounds" value={String(tournament.resolvedSwissRounds)} />
+            {/* Same grouping and the same applies-to rules as the create form, so every setting the
+                form offered is reported back and nothing it hid appears here. */}
+            <Stack spacing={2.5} sx={{ mt: 2 }}>
+              <DetailSection title="Basics">
+                <DetailRow label="Date" value={tournament.date} />
+                <DetailRow label="Type" value={tournamentTypeLabels[tournament.type]} />
+                <DetailRow label="Score type" value={scoreTypeLabels[tournament.defaultScoreType]} />
+              </DetailSection>
+
+              {shape.isGroupStagePlayoff && (
+                <DetailSection title="Structure">
+                  <DetailRow label="Group stage" value={groupStageKindLabels[tournament.groupStageKind]} />
+                  <DetailRow label="Playoff" value={playoffKindLabels[tournament.playoffKind]} />
+                  {shape.usesRoundRobinGroups ? (
+                    <DetailRow label="Groups" value={String(tournament.groupCount)} />
+                  ) : (
+                    <DetailRow
+                      label="Swiss rounds"
+                      value={
+                        tournament.swissRounds > 0
+                          ? String(tournament.swissRounds)
+                          : `${tournament.resolvedSwissRounds} (auto)`
+                      }
+                    />
+                  )}
+                  <DetailRow
+                    label="Playoff size"
+                    value={
+                      tournament.playoffSize > 0
+                        ? String(tournament.playoffSize)
+                        : `${tournament.playoffCapacity} (auto)`
+                    }
+                  />
+                </DetailSection>
+              )}
+
+              <DetailSection title="Match formats">
+                {shape.showsSingleFormat && (
+                  <DetailRow label="Match format" value={matchFormatLabels[tournament.defaultMatchFormat]} />
                 )}
-                <DetailRow
-                  label="Playoff size"
-                  value={
-                    tournament.playoffSize > 0
-                      ? String(tournament.playoffSize)
-                      : `${tournament.playoffCapacity} (auto)`
-                  }
-                />
-              </>
-            )}
-            <DetailRow label="Default match format" value={matchFormatLabels[tournament.defaultMatchFormat]} />
-            <DetailRow label="Default score type" value={scoreTypeLabels[tournament.defaultScoreType]} />
-            <DetailRow label="Third place match" value={tournament.thirdPlaceEnabled ? 'Enabled' : 'Disabled'} />
-            <DetailRow
-              label="Notes"
-              value={tournament.notes?.trim() ? tournament.notes : '—'}
-              sx={{ gridColumn: { xs: '1', sm: '1 / -1' } }}
-            />
-            </Box>
+                {shape.isGroupStagePlayoff && (
+                  <DetailRow label="Group stage" value={matchFormatLabels[tournament.groupStageMatchFormat]} />
+                )}
+                {shape.usesBracketFormats && (
+                  <DetailRow
+                    label={shape.showsAllBracketFormats ? 'Upper bracket' : 'Playoff'}
+                    value={matchFormatLabels[tournament.upperBracketFormat]}
+                  />
+                )}
+                {shape.showsAllBracketFormats && (
+                  <DetailRow label="Lower bracket" value={matchFormatLabels[tournament.lowerBracketFormat]} />
+                )}
+                {!shape.isRoundRobin && (
+                  <DetailRow
+                    label={shape.showsAllBracketFormats ? 'Grand Final' : 'Final'}
+                    value={matchFormatLabels[tournament.grandFinalFormat]}
+                  />
+                )}
+              </DetailSection>
+
+              {shape.showsRules && (
+                <DetailSection title="Rules">
+                  {shape.playoffIsSingleElimination && (
+                    <DetailRow
+                      label="Third place match"
+                      value={tournament.thirdPlaceEnabled ? 'Enabled' : 'Disabled'}
+                    />
+                  )}
+                  {shape.showsTiebreakerPolicy && (
+                    <DetailRow label="Tie-breaker" value={tiebreakerPolicyLabels[tournament.tiebreakerPolicy]} />
+                  )}
+                </DetailSection>
+              )}
+
+              {/* The heading already names it, so the body is the note itself rather than a label/value pair. */}
+              <Stack spacing={1}>
+                <SectionHeading title="Notes" />
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }} color={tournament.notes?.trim() ? undefined : 'text.secondary'}>
+                  {tournament.notes?.trim() ? tournament.notes : '—'}
+                </Typography>
+              </Stack>
+            </Stack>
           </Collapse>
         </CardContent>
       </Card>
 
       {tournament.status === 'Planned' ? (
         <>
-          <ParticipantsSection tournamentId={tournament.id} tournamentType={tournament.type} />
+          <ParticipantsSection
+            tournamentId={tournament.id}
+            tournamentType={tournament.type}
+            minPanels={tournament.minParticipants}
+            onUnsavedChange={setRosterUnsaved}
+          />
           {/*
             A Swiss group stage has no draw - round 1 is paired from the seed order, so it uses the
             same bracket preview every non-group type does.
           */}
           {tournament.type === 'GroupStagePlayoff' && tournament.groupStageKind === 'RoundRobin' ? (
-            <GroupsPreview tournamentId={tournament.id} groupCount={tournament.groupCount} />
+            <GroupsPreview
+              tournamentId={tournament.id}
+              groupCount={tournament.groupCount}
+              rosterUnsaved={rosterUnsaved}
+            />
           ) : (
-            <BracketPreview tournamentId={tournament.id} tournamentType={tournament.type} />
+            <BracketPreview
+              tournamentId={tournament.id}
+              tournamentType={tournament.type}
+              rosterUnsaved={rosterUnsaved}
+            />
           )}
         </>
       ) : (
@@ -313,7 +384,12 @@ export function TournamentDetailPage() {
         sx={{ alignItems: 'center', flexWrap: 'wrap', color: 'text.secondary' }}
       >
         <Typography variant="caption">Public view:</Typography>
-        <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>
+        {/*
+          The URL is hidden on a phone, where it wraps to three lines of unreadable token and costs
+          more space than the rest of the page footer. Copy and Open stay - they are how the link is
+          actually shared, and dropping them would make a phone the one place you can't hand it out.
+        */}
+        <Typography variant="caption" sx={{ wordBreak: 'break-all', display: { xs: 'none', sm: 'block' } }}>
           {publicUrl}
         </Typography>
         <Tooltip title="Copy link">
@@ -391,9 +467,21 @@ export function TournamentDetailPage() {
   );
 }
 
-function DetailRow({ label, value, sx }: { label: string; value: string; sx?: SxProps<Theme> }) {
+/** A titled group of label/value rows, mirroring the create form's sections. */
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Stack direction="row" spacing={2} sx={sx}>
+    <Stack spacing={1}>
+      <SectionHeading title={title} />
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, columnGap: 4, rowGap: 1 }}>
+        {children}
+      </Box>
+    </Stack>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Stack direction="row" spacing={2}>
       <Typography variant="body2" color="text.secondary" sx={{ minWidth: 180 }}>
         {label}
       </Typography>
