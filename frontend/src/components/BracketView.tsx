@@ -942,7 +942,11 @@ function RoundColumns({
 /**
  * Winner/hover styling for one slot of a match, shared by the card view (`SlotRow`) and the group
  * matches table (`GroupMatchRow`) so the two stay in sync: `rowSx` goes on the container (winner
- * tint + hover ring), `textSx` on the name itself (bold once either applies, dimmed when empty).
+ * tint + hover ring), `textSx` on the name itself (bold for a winner, dimmed when empty).
+ *
+ * Hovering deliberately changes no text weight. Re-weighting a name reflows the line under the
+ * cursor, so tracking one participant across the bracket makes every row they appear in twitch; the
+ * ring alone marks them, and it costs no layout.
  */
 function slotHighlight(slot: BracketSlot | null, winnerId: string | null, hoveredId: string | null) {
   const isWinner = slot != null && winnerId === slot.participantId;
@@ -954,7 +958,7 @@ function slotHighlight(slot: BracketSlot | null, winnerId: string | null, hovere
     },
     textSx: {
       color: slot ? 'text.primary' : 'text.disabled',
-      fontWeight: isWinner || isHovered ? 700 : 400,
+      fontWeight: isWinner ? 700 : 400,
     },
   };
 }
@@ -1311,7 +1315,8 @@ function StandingsTable({
                     )}
                   </TableCell>
                   <TableCell>
-                    <ParticipantLabel name={row.name} emoji={row.emoji} sx={{ fontWeight: isHovered ? 700 : 400 }} />
+                    {/* No hover weight change - see slotHighlight; the row's ring is the highlight. */}
+                    <ParticipantLabel name={row.name} emoji={row.emoji} />
                   </TableCell>
                   <TableCell align="right">{row.played}</TableCell>
                   <TableCell align="right">{row.wins}</TableCell>

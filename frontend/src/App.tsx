@@ -7,6 +7,7 @@ import { CreateTournamentPage } from './pages/CreateTournamentPage';
 import { EditTournamentPage } from './pages/EditTournamentPage';
 import { TournamentDetailPage } from './pages/TournamentDetailPage';
 import { PublicTournamentPage } from './pages/PublicTournamentPage';
+import { UnmatchedPage } from './pages/UnmatchedPage';
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/tournaments/new" element={<CreateTournamentPage />} />
         <Route path="/tournaments/:id" element={<TournamentDetailPage />} />
         <Route path="/tournaments/:id/edit" element={<EditTournamentPage />} />
+        <Route path="/unmatched" element={<UnmatchedPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

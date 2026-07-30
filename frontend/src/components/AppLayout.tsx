@@ -1,18 +1,32 @@
-import { AppBar, Box, Button, Container, IconButton, Toolbar, Typography } from '@mui/material';
+import {
+  AppBar,
+  Box,
+  Container,
+  Divider,
+  IconButton,
+  Menu,
+  MenuItem,
+  Toolbar,
+  Typography,
+} from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
+import MenuIcon from '@mui/icons-material/Menu';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useAuth } from '../auth/AuthContext';
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
   const { mode, setMode } = useColorScheme();
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const closeMenu = () => setMenuAnchor(null);
 
   const handleLogout = () => {
+    closeMenu();
     logout();
     navigate('/login', { replace: true });
   };
@@ -52,9 +66,33 @@ export function AppLayout({ children }: { children: ReactNode }) {
             {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
           </IconButton>
           {isAuthenticated && (
-            <Button color="inherit" onClick={handleLogout}>
-              Log out
-            </Button>
+            <>
+              <IconButton
+                color="inherit"
+                edge="end"
+                onClick={(e) => setMenuAnchor(e.currentTarget)}
+                aria-label="Open menu"
+                aria-haspopup="menu"
+                aria-expanded={menuAnchor !== null}
+              >
+                <MenuIcon />
+              </IconButton>
+              <Menu
+                anchorEl={menuAnchor}
+                open={menuAnchor !== null}
+                onClose={closeMenu}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              >
+                {/* Navigation first, account actions below the rule - Log out is the one item here
+                    that can't be undone by pressing Back, so it stays visually separate. */}
+                <MenuItem component={RouterLink} to="/unmatched" onClick={closeMenu}>
+                  Unmatched
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={handleLogout}>Log out</MenuItem>
+              </Menu>
+            </>
           )}
         </Toolbar>
       </AppBar>
