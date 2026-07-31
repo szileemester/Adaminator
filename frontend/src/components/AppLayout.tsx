@@ -2,7 +2,6 @@ import {
   AppBar,
   Box,
   Container,
-  Divider,
   IconButton,
   Menu,
   MenuItem,
@@ -84,12 +83,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 transformOrigin={{ vertical: 'top', horizontal: 'right' }}
               >
-                {/* Navigation first, account actions below the rule - Log out is the one item here
-                    that can't be undone by pressing Back, so it stays visually separate. */}
-                <MenuItem component={RouterLink} to="/unmatched" onClick={closeMenu}>
-                  Unmatched
-                </MenuItem>
-                <Divider />
                 <MenuItem onClick={handleLogout}>Log out</MenuItem>
               </Menu>
             </>

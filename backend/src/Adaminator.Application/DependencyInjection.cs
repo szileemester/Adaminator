@@ -1,4 +1,5 @@
 using Adaminator.Application.Tournaments;
+using Adaminator.Application.Unmatched;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,6 +14,7 @@ public static class DependencyInjection
         services.AddScoped<ParticipantService>();
         services.AddScoped<BracketService>();
         services.AddScoped<MatchService>();
+        services.AddScoped<UnmatchedService>();
         return services;
     }
 }

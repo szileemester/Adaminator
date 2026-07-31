@@ -1,4 +1,5 @@
 using Adaminator.Application.Tournaments;
+using Adaminator.Application.Unmatched;
 using Adaminator.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,7 @@ public static class DependencyInjection
     {
         services.AddDbContext<AdaminatorDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<ITournamentRepository, TournamentRepository>();
+        services.AddScoped<IUnmatchedRepository, UnmatchedRepository>();
         return services;
     }
 }

@@ -14,6 +14,11 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/public/:token" element={<PublicTournamentPage />} />
+      {/*
+        Unlisted rather than protected: nothing links here, but anyone given the URL can watch the
+        house Unmatched ladder without an admin password. Editing it still needs one - see the API.
+      */}
+      <Route path="/unmatched" element={<UnmatchedPage />} />
 
       <Route
         element={
@@ -28,7 +33,6 @@ export default function App() {
         <Route path="/tournaments/new" element={<CreateTournamentPage />} />
         <Route path="/tournaments/:id" element={<TournamentDetailPage />} />
         <Route path="/tournaments/:id/edit" element={<EditTournamentPage />} />
-        <Route path="/unmatched" element={<UnmatchedPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
