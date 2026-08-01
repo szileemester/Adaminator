@@ -197,12 +197,16 @@ export function TournamentForm({
     }
   }, [playoffIsSingleElimination, setValue]);
 
-  // A Swiss pool ranks on match wins, so Best of 2's games-won ranking doesn't apply to it.
+  // A Swiss pool ranks on match wins, so Best of 2's games-won ranking doesn't apply to it - the one
+  // format it cannot keep. Only that one is replaced: this runs on the first render too, so resetting
+  // unconditionally would silently rewrite a saved Swiss tournament's format every time Edit is opened,
+  // and save the rewrite the moment anything else is changed.
+  const groupStageMatchFormat = watch('groupStageMatchFormat');
   useEffect(() => {
-    if (usesSwissPool) {
+    if (usesSwissPool && !decisiveFormat.safeParse(groupStageMatchFormat).success) {
       setValue('groupStageMatchFormat', 'Bo3');
     }
-  }, [usesSwissPool, setValue]);
+  }, [usesSwissPool, groupStageMatchFormat, setValue]);
 
   const submit = handleSubmit((values) => {
     // Segments a type doesn't have collapse onto the format it does use, so a hidden picker never

@@ -116,8 +116,10 @@ export function BracketPreview({
     mutationFn: () => startTournament(tournamentId),
     onSuccess: async () => {
       setConfirmStart(false);
+      // ['tournaments'] alone would do it - it prefix-matches ['tournaments', id] - but the detail
+      // query is named explicitly so the intent survives any later change to the list key.
       await queryClient.invalidateQueries({ queryKey: ['tournaments'] });
-      await queryClient.invalidateQueries({ queryKey: ['tournament', tournamentId] });
+      await queryClient.invalidateQueries({ queryKey: ['tournaments', tournamentId] });
       await queryClient.invalidateQueries({ queryKey: ['bracket', tournamentId] });
     },
     onError: (err) => {

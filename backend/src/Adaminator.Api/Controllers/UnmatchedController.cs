@@ -1,13 +1,16 @@
+using Adaminator.Api.Infrastructure;
 using Adaminator.Application.Unmatched;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Adaminator.Api.Controllers;
 
 /// <summary>
-/// The house Unmatched ladder. Reading is anonymous so the page can be shared with the other players
-/// by link alone; writing still needs the admin login, because the page's own "hidden" editor is a
-/// client-side gesture and could not protect an open endpoint from anyone who found the URL.
+/// The house Unmatched ladder. Both reading and writing are anonymous: the page is shared with the
+/// other players by link alone, and whoever has the link is trusted to record the result. The only
+/// thing standing between a visitor and a write is the editor's hidden gesture, which is a
+/// convenience, not a credential - the domain's validation is the real guard on what can be stored.
 /// </summary>
 [ApiController]
 [Route("api/unmatched")]
@@ -26,7 +29,9 @@ public class UnmatchedController : ControllerBase
         Ok(await _service.GetAsync(cancellationToken));
 
     [HttpPut]
-    [Authorize]
+    [AllowAnonymous]
+    // The only anonymous write in the API, so the only one a loop could sit on.
+    [EnableRateLimiting(RateLimitPolicies.PublicWrite)]
     public async Task<ActionResult<UnmatchedScoreboardDto>> Update(
         [FromBody] UpdateUnmatchedScoreboardRequest request, CancellationToken cancellationToken) =>
         Ok(await _service.UpdateAsync(request, cancellationToken));

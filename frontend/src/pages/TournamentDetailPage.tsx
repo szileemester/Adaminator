@@ -83,11 +83,16 @@ export function TournamentDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ['tournaments'] });
       navigate('/');
     },
+    // Without this a failed delete just re-enables the dialog button and says nothing at all.
+    onError: (err: unknown) => {
+      setConfirmOpen(false);
+      setActionError(extractErrorMessage(err));
+    },
   });
 
   const isPlanned = tournament?.status === 'Planned';
 
-  const { data: bracket } = useQuery({
+  const { data: bracket, isError: bracketFailed, error: bracketError } = useQuery({
     queryKey: ['bracket', id],
     queryFn: () => getBracket(id),
     enabled: Boolean(tournament) && !isPlanned,
@@ -147,8 +152,14 @@ export function TournamentDetailPage() {
   const shape = tournamentSettingsShape(tournament.type, tournament.groupStageKind, tournament.playoffKind);
 
   const copyPublicLink = async () => {
-    await navigator.clipboard.writeText(publicUrl);
-    setCopied(true);
+    // navigator.clipboard is undefined outside a secure context - reaching the dev server from a phone
+    // over plain http is exactly that, and an unhandled rejection there would look like a dead button.
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+    } catch {
+      setActionError('Could not copy the link. Copy it from the address bar instead.');
+    }
   };
 
   return (
@@ -174,6 +185,16 @@ export function TournamentDetailPage() {
           </Button>
         </Stack>
       </Stack>
+
+      {/*
+        Page level rather than inside the bracket card: Delete and Copy link are on every tournament,
+        including a Planned one, which has no bracket card to show their failure in.
+      */}
+      {actionError && (
+        <Alert severity="error" onClose={() => setActionError(null)}>
+          {actionError}
+        </Alert>
+      )}
 
       {/*
         Collapsed by default: the settings here are fixed once the tournament starts, so they are
@@ -363,14 +384,12 @@ export function TournamentDetailPage() {
               )}
             </Stack>
 
-            {actionError && (
-              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
-                {actionError}
-              </Alert>
-            )}
-
             {bracket ? (
               <BracketView bracket={bracket} tournamentId={tournament.id} focusStage={focusStage} />
+            ) : bracketFailed ? (
+              // Otherwise a failed load spins here for ever, with the action buttons above it still
+              // offering to finish a tournament whose bracket never arrived.
+              <Alert severity="error">{extractErrorMessage(bracketError, 'Could not load the bracket.')}</Alert>
             ) : (
               <CircularProgress size={24} />
             )}
@@ -418,7 +437,7 @@ export function TournamentDetailPage() {
       <ConfirmDialog
         open={confirmFinishOpen}
         title="Finish tournament"
-        message="This marks the tournament as Finished. You can undo the latest match result afterward to reopen it if needed."
+        message="This marks the tournament as Finished and locks the result - a finished tournament's matches can no longer be undone."
         confirmLabel="Finish"
         confirmColor="success"
         busy={finishMutation.isPending}

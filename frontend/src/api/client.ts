@@ -1,11 +1,40 @@
 import axios from 'axios';
 
 const TOKEN_KEY = 'adaminator.token';
+const EXPIRY_KEY = 'adaminator.token.expiresAt';
+
+/** A stored token counts as gone once it expires - the server would only reject it anyway. */
+function readToken(): string | null {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) {
+    return null;
+  }
+
+  const expiresAt = localStorage.getItem(EXPIRY_KEY);
+  if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+    clearToken();
+    return null;
+  }
+
+  return token;
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(EXPIRY_KEY);
+}
 
 export const tokenStore = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
+  get: readToken,
+  set: (token: string, expiresAt?: string) => {
+    localStorage.setItem(TOKEN_KEY, token);
+    if (expiresAt) {
+      localStorage.setItem(EXPIRY_KEY, expiresAt);
+    } else {
+      localStorage.removeItem(EXPIRY_KEY);
+    }
+  },
+  clear: clearToken,
 };
 
 export const apiClient = axios.create({
@@ -20,11 +49,16 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+const LOGIN_PATH = '/api/auth/login';
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    const hadToken = tokenStore.get();
-    if (error.response?.status === 401 && hadToken) {
+    // A 401 from the login call itself means the password was wrong, not that the session ended -
+    // without this, mistyping the password on /login while already signed in would throw away a
+    // perfectly good token and leave the app authenticated in memory with nothing to send.
+    const isLoginAttempt = error.config?.url?.includes(LOGIN_PATH) ?? false;
+    if (error.response?.status === 401 && !isLoginAttempt && tokenStore.get()) {
       // Token expired or invalid: drop it and send the admin back to login.
       tokenStore.clear();
       if (!window.location.pathname.startsWith('/login')) {

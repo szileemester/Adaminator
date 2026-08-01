@@ -20,15 +20,14 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import { getUnmatchedScoreboard, saveUnmatchedScoreboard } from '../api/unmatched';
 import type { UnmatchedPick, UnmatchedScoreboard, UnmatchedTeam } from '../api/unmatched';
 import { extractErrorMessage } from '../api/client';
-import { useAuth } from '../auth/AuthContext';
 
 /**
  * The house Unmatched scoreboard, drawn as a comic book cover: the two fixed teams, what each player
  * is currently playing, the running win totals and a crown over whoever took the last game.
  *
- * The page is unlisted rather than protected - anyone given the link can watch it. The editor behind
- * it is opened by a click gesture on the VS badge, but saving still goes through the admin login,
- * because a client-side secret cannot protect an endpoint that is open to whoever finds the URL.
+ * The page is unlisted rather than protected - anyone given the link can watch it, and anyone who
+ * finds the click gesture on the VS badge can record a result. That is deliberate: the players are
+ * not admins, and the gesture is there to keep the editor out of the way, not to keep anyone out.
  */
 const CHARACTERS = Object.entries(
   import.meta.glob<string>('../assets/characters/*.webp', { eager: true, import: 'default', query: '?url' }),
@@ -573,7 +572,6 @@ function ScoreboardEditor({
   scoreboard: UnmatchedScoreboard;
   onClose: () => void;
 }) {
-  const { isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   // Initialised straight from the scoreboard - this component only exists while the dialog is open, so
   // there is no stale state to reset and no effect to do the resetting.
@@ -609,9 +607,6 @@ function ScoreboardEditor({
       <DialogTitle>Eredmény</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          {!isAuthenticated && (
-            <Alert severity="info">Mentéshez be kell jelentkezni adminként.</Alert>
-          )}
           {save.error && <Alert severity="error">{extractErrorMessage(save.error)}</Alert>}
 
           <Stack direction="row" spacing={2}>
@@ -678,7 +673,7 @@ function ScoreboardEditor({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Mégse</Button>
-        <Button variant="contained" onClick={() => save.mutate()} disabled={save.isPending || !isAuthenticated}>
+        <Button variant="contained" onClick={() => save.mutate()} disabled={save.isPending}>
           Mentés
         </Button>
       </DialogActions>

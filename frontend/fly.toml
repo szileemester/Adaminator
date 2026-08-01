@@ -1,7 +1,12 @@
 app = "adaminator"
 primary_region = "fra"
 
+# Vite bakes the API URL into the bundle at build time, so it has to be a build arg. Pinning it here
+# means `fly deploy` produces a working site on its own - passing it on the command line instead worked
+# right up until the once someone forgot, which deploys a green, healthy frontend calling localhost.
 [build]
+  [build.args]
+    VITE_API_URL = "https://adaminator-api.fly.dev"
 
 [http_service]
   internal_port = 80

@@ -13,9 +13,12 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => tokenStore.get());
 
+  // Storing the expiry alongside the token means an 8-hour-old session is recognised as over before the
+  // first request is sent, rather than after one fails - so ProtectedRoute redirects on arrival instead
+  // of letting a whole form be filled in and then thrown away by the 401 handler.
   const login = useCallback(async (password: string) => {
     const result = await loginRequest(password);
-    tokenStore.set(result.token);
+    tokenStore.set(result.token, result.expiresAt);
     setToken(result.token);
   }, []);
 

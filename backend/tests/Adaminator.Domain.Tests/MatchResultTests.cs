@@ -177,6 +177,27 @@ public class MatchResultTests
         other.MatchFormat.Should().Be(MatchFormat.Bo3);
     }
 
+    /// <summary>
+    /// The per-match override may pick a different decisive format, but not one the settings could never
+    /// have chosen for this match. A Best-of-2 bracket match could end level, completing with no winner
+    /// and nobody to advance - the same rule the tournament settings already enforce.
+    /// </summary>
+    [Fact]
+    public void A_bracket_match_cannot_override_its_format_to_one_that_allows_a_draw()
+    {
+        var tournament = StartedFourPlayer(format: MatchFormat.Bo3);
+        var match = Semifinal(tournament, 0);
+        var level = new List<ScoreEntryInput> { new(null, null, true), new(null, null, false) };
+
+        tournament.Invoking(t => t.CompleteMatch(match.Id, MatchFormat.Bo2, ScoreType.Games, level, Now))
+            .Should().Throw<DomainException>().WithMessage("*Only the Group Stage format may allow draws*");
+        tournament.Invoking(t => t.SaveMatchResult(match.Id, MatchFormat.Bo2, ScoreType.Games, level))
+            .Should().Throw<DomainException>().WithMessage("*Only the Group Stage format may allow draws*");
+
+        match.Status.Should().Be(MatchStatus.Pending);
+        match.MatchFormat.Should().Be(MatchFormat.Bo3);
+    }
+
     // ---- Forfeit (BR-020, FR-FORFEIT-001..004) ----
 
     [Fact]

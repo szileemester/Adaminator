@@ -15,6 +15,11 @@ export function PublicTournamentPage() {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['public', token],
     queryFn: () => getPublicTournament(token),
+    // This is the one screen whose whole point is watching a tournament as it is played. The app
+    // disables focus refetching globally, which suits the admin views - they refresh on their own
+    // actions - but leaves a spectator staring at whatever the bracket looked like when they opened it.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 
   return (

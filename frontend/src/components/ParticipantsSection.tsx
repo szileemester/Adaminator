@@ -106,7 +106,12 @@ export function ParticipantsSection({
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const edited = useRef(false);
 
-  const { data: participants = [], isSuccess: rosterLoaded } = useQuery({
+  const {
+    data: participants = [],
+    isSuccess: rosterLoaded,
+    isError: rosterFailed,
+    error: rosterError,
+  } = useQuery({
     queryKey: ['participants', tournamentId],
     queryFn: () => listParticipants(tournamentId),
   });
@@ -179,6 +184,14 @@ export function ParticipantsSection({
           <Typography variant="h6">Participants</Typography>
           <Chip size="small" color={countColor} label={`${count} / ${MAX_PARTICIPANTS}`} />
         </Stack>
+
+        {/* A roster that failed to load leaves the panels empty, which is indistinguishable from a
+            roster that was wiped - and the editor would happily save that emptiness over the real one. */}
+        {rosterFailed && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {extractErrorMessage(rosterError, 'Could not load the participants. Reload the page before editing.')}
+          </Alert>
+        )}
 
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

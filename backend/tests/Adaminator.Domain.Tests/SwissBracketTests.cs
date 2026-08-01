@@ -13,11 +13,11 @@ public class SwissBracketTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 7, 26, 10, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Now = new(2026, 7, 26, 12, 0, 0, TimeSpan.Zero);
 
-    private static Tournament StartedSwiss(int participantCount, int swissRounds = 0)
+    private static Tournament StartedSwiss(int participantCount, int swissRounds = 0, MatchFormat? groupStageFormat = null)
     {
         var tournament = Tournament.Create(
             "Swiss Open", Date, null, TournamentType.GroupStagePlayoff, MatchFormat.Bo1, ScoreType.Games, false, CreatedAt,
-            groupCount: 0, groupStageKind: GroupStageKind.Swiss, swissRounds: swissRounds);
+            groupCount: 0, groupStageMatchFormat: groupStageFormat, groupStageKind: GroupStageKind.Swiss, swissRounds: swissRounds);
 
         for (var i = 1; i <= participantCount; i++)
         {
@@ -219,5 +219,46 @@ public class SwissBracketTests
             played.Id, played.MatchFormat, ScoreType.Games, new List<ScoreEntryInput> { new(null, null, true) }, Now);
 
         tournament.CanUndo(played.Id).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The next round is paired from the standings the current one produced, so undoing a result it was
+    /// computed from would leave those pairings standing on a result that no longer exists.
+    /// </summary>
+    [Fact]
+    public void A_result_cannot_be_undone_once_the_next_round_has_been_paired()
+    {
+        var tournament = StartedSwiss(8, swissRounds: 3);
+        DecideRound(tournament);
+        var latest = Round(tournament, 1).OrderByDescending(m => m.CompletionSequence).First();
+        tournament.CanUndo(latest.Id).Should().BeTrue();
+
+        tournament.StartNextSwissRound();
+
+        tournament.CanUndo(latest.Id).Should().BeFalse();
+        tournament.Invoking(t => t.UndoMatch(latest.Id))
+            .Should().Throw<DomainException>().WithMessage("*later stage has already been drawn*");
+    }
+
+    /// <summary>
+    /// A bye is a win, and the game differential must not quietly take it back. Recording no games at all
+    /// would leave whoever sat out worth 0 to that criterion while an identical record that played is
+    /// worth a positive margin - so the bye is credited the sweep its format's winner would have taken.
+    /// </summary>
+    [Fact]
+    public void A_bye_is_credited_the_games_a_clean_win_would_have_taken()
+    {
+        var tournament = StartedSwiss(7, groupStageFormat: MatchFormat.Bo3);
+        var sitter = Round(tournament, 1).Single(m => m.IsBye).ParticipantAId!.Value;
+
+        var standing = RoundRobinStandings.Rank(
+                tournament.Matches.Where(m => m.Segment == BracketSegment.RoundRobin),
+                tournament.Participants.ToList(),
+                tournament.Participants.ToDictionary(p => p.Id))
+            .Single(s => s.ParticipantId == sitter);
+
+        standing.Wins.Should().Be(1);
+        standing.GamesWon.Should().Be(MatchFormat.Bo3.RequiredWins());
+        standing.GamesLost.Should().Be(0);
     }
 }

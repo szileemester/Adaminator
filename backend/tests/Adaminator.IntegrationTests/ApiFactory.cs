@@ -1,3 +1,7 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Testcontainers.PostgreSql;
@@ -11,6 +15,26 @@ namespace Adaminator.IntegrationTests;
 public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     public const string AdminPassword = "test-password";
+
+    /// <summary>Matches the API's own serializer: camel case with string enums.</summary>
+    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    /// <summary>A client carrying an admin bearer token, for the endpoints that require one.</summary>
+    public async Task<HttpClient> CreateAuthenticatedClientAsync()
+    {
+        var client = CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = AdminPassword });
+        // Fail here rather than leaving every test in the class to fail on an unexplained 401.
+        login.EnsureSuccessStatusCode();
+        var token = await login.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token!.Token);
+        return client;
+    }
+
+    private record LoginResponse(string Token);
 
     private readonly PostgreSqlContainer _database = new PostgreSqlBuilder()
         .WithImage("postgres:16-alpine")

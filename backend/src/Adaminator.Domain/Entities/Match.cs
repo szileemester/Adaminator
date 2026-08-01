@@ -51,8 +51,8 @@ public class Match
     public Guid? LoserId => WinnerId is null ? null : (WinnerId == ParticipantAId ? ParticipantBId : ParticipantAId);
 
     /// <summary>
-    /// Fixed at creation from the tournament's default score type - like <see cref="MatchFormat"/>,
-    /// never a per-match choice at result-entry time.
+    /// Set at creation from the tournament's default score type, and - like <see cref="MatchFormat"/> -
+    /// overridable for this match alone when the result is entered.
     /// </summary>
     public ScoreType ScoreType { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }

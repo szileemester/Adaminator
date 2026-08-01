@@ -21,6 +21,30 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptio
 builder.Services.Configure<AdminOptions>(builder.Configuration.GetSection(AdminOptions.SectionName));
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
 
+// Outside development, refuse to start on the placeholders committed in appsettings.json. They are
+// long enough for HMAC-SHA256 to accept, so a Fly secret that is missing, renamed or typo'd would
+// otherwise boot a healthy-looking API signing admin tokens with a key that is in the public repo -
+// and accepting a password that is in it too. The connection string already fails fast this way.
+if (!builder.Environment.IsDevelopment())
+{
+    EnsureRealSecret("Jwt:Key", jwtOptions.Key);
+    EnsureRealSecret("Admin:Password", builder.Configuration[$"{AdminOptions.SectionName}:Password"]);
+
+    // HMAC-SHA256 needs a key at least as long as its output, and a short one is a weak one regardless.
+    if (Encoding.UTF8.GetByteCount(jwtOptions.Key) < 32)
+    {
+        throw new InvalidOperationException("'Jwt:Key' must be at least 32 bytes.");
+    }
+}
+
+static void EnsureRealSecret(string key, string? value)
+{
+    if (string.IsNullOrWhiteSpace(value) || value.StartsWith("REPLACE_ME", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"'{key}' is not configured - set it as a secret rather than leaving the placeholder.");
+    }
+}
+
 // ---- Core services ----
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddApplication();
@@ -87,12 +111,24 @@ var loginRateLimit = builder.Configuration.GetSection(LoginRateLimitOptions.Sect
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("login", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+    options.AddPolicy(RateLimitPolicies.Login, httpContext => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = loginRateLimit.PermitLimit,
             Window = TimeSpan.FromSeconds(loginRateLimit.WindowSeconds),
+            QueueLimit = 0,
+        }));
+
+    // The Unmatched scoreboard is the one endpoint that writes to the database without a login, so it
+    // is also the one an anonymous caller could hammer. Recording a result is a once-a-game action, so
+    // a ceiling this far above real use costs the players nothing and keeps a loop off the database.
+    options.AddPolicy(RateLimitPolicies.PublicWrite, httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         }));
 });

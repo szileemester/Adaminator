@@ -472,6 +472,34 @@ public class TiebreakerTests
         tb.WinnerId.Should().BeNull();
     }
 
+    /// <summary>
+    /// The tie-breaker wave is drawn from the completed standings, and a new wave cannot be generated
+    /// while one is outstanding - so undoing a group match it was computed from would leave participants
+    /// playing off a tie they may no longer be in.
+    /// </summary>
+    [Fact]
+    public void A_group_match_cannot_be_undone_once_a_tiebreaker_has_been_drawn_from_it()
+    {
+        var t = StartedRoundRobin(4, TiebreakerPolicy.ComputedThenMatch);
+        Win(t, "P1", "P2");
+        Win(t, "P1", "P3");
+        Win(t, "P1", "P4");
+        Win(t, "P2", "P3");
+        Win(t, "P3", "P4");
+        Win(t, "P4", "P2");
+        var latest = t.Matches
+            .Where(m => m.Segment == BracketSegment.RoundRobin)
+            .OrderByDescending(m => m.CompletionSequence)
+            .First();
+        t.CanUndo(latest.Id).Should().BeTrue();
+
+        t.StartTiebreakers();
+
+        t.CanUndo(latest.Id).Should().BeFalse();
+        t.Invoking(x => x.UndoMatch(latest.Id))
+            .Should().Throw<DomainException>().WithMessage("*later stage has already been drawn*");
+    }
+
     private static void Win(Tournament tournament, string winner, string loser, BracketSegment segment)
     {
         var match = RoundRobinMatch(tournament, winner, loser, segment);

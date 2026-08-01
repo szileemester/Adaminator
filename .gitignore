@@ -32,3 +32,6 @@ Thumbs.db
 
 # Local (per-developer) Claude Code settings
 .claude/settings.local.json
+
+# Scratch diffs written by review tooling
+.review-diff.txt

@@ -18,4 +18,7 @@ WORKDIR /app
 COPY --from=build /app ./
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
+# These images default to root, and nothing here needs it - 8080 is unprivileged. APP_UID is the
+# non-root user the .NET runtime images predefine.
+USER $APP_UID
 ENTRYPOINT ["dotnet", "Adaminator.Api.dll"]

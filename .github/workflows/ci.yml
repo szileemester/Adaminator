@@ -33,6 +33,11 @@ jobs:
       - name: Install
         run: npm ci
         working-directory: frontend
+      # tsc doesn't know the rules of hooks; oxlint does, and it was configured but never run here,
+      # so a conditional hook could merge green and only break in the browser.
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
       - name: Build
         run: npm run build
         working-directory: frontend

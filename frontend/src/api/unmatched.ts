@@ -22,7 +22,7 @@ export async function getUnmatchedScoreboard(): Promise<UnmatchedScoreboard> {
   return data;
 }
 
-/** Requires the admin login - the page's hidden editor is a gesture, not a credential. */
+/** Writable without a login too: whoever has the link is trusted to record the result. */
 export async function saveUnmatchedScoreboard(
   scoreboard: Pick<UnmatchedScoreboard, 'fiukWins' | 'lanyokWins' | 'lastVictor' | 'picks'>,
 ): Promise<UnmatchedScoreboard> {

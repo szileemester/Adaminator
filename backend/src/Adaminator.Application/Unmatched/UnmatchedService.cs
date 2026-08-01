@@ -1,4 +1,5 @@
 using Adaminator.Domain.Entities;
+using FluentValidation;
 
 namespace Adaminator.Application.Unmatched;
 
@@ -9,11 +10,16 @@ namespace Adaminator.Application.Unmatched;
 public class UnmatchedService
 {
     private readonly IUnmatchedRepository _repository;
+    private readonly IValidator<UpdateUnmatchedScoreboardRequest> _validator;
     private readonly TimeProvider _timeProvider;
 
-    public UnmatchedService(IUnmatchedRepository repository, TimeProvider timeProvider)
+    public UnmatchedService(
+        IUnmatchedRepository repository,
+        IValidator<UpdateUnmatchedScoreboardRequest> validator,
+        TimeProvider timeProvider)
     {
         _repository = repository;
+        _validator = validator;
         _timeProvider = timeProvider;
     }
 
@@ -27,6 +33,7 @@ public class UnmatchedService
     public async Task<UnmatchedScoreboardDto> UpdateAsync(
         UpdateUnmatchedScoreboardRequest request, CancellationToken cancellationToken = default)
     {
+        await _validator.ValidateAndThrowAsync(request, cancellationToken);
         var scoreboard = await _repository.GetAsync(cancellationToken);
         if (scoreboard is null)
         {

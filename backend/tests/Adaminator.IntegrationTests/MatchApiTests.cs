@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -746,19 +745,11 @@ public class MatchApiTests : IClassFixture<ApiFactory>
         return tournamentId;
     }
 
-    private async Task<HttpClient> CreateAuthenticatedClientAsync()
-    {
-        var client = _factory.CreateClient();
-        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = ApiFactory.AdminPassword });
-        var token = await login.Content.ReadFromJsonAsync<LoginBody>(JsonOptions);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token!.Token);
-        return client;
-    }
+    private Task<HttpClient> CreateAuthenticatedClientAsync() => _factory.CreateAuthenticatedClientAsync();
 
     private record CreatedTournament(Guid Id, string PublicToken);
     private record CreatedParticipant(Guid Id, string Name);
     private record TournamentStatusResponse(string Status);
-    private record LoginBody(string Token);
     private record ParticipantSlotResponse(Guid ParticipantId, string Name);
     private record MatchResponse(
         Guid Id, string Segment, int Round, int IndexInRound,

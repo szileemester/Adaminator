@@ -264,6 +264,29 @@ public class GroupStagePlayoffMatchResultTests
         groupMatch.WinnerId.Should().BeNull();
     }
 
+    /// <summary>
+    /// A group match routes to nobody, but the playoff bracket was seeded from the standings it belongs
+    /// to - and the playoff cannot be drawn a second time. Undoing it would leave the bracket holding
+    /// whoever qualified on a result that no longer exists.
+    /// </summary>
+    [Fact]
+    public void A_group_match_cannot_be_undone_once_the_playoff_has_been_seeded_from_it()
+    {
+        var tournament = StartedGroupStage(8, 2);
+        DecideAllGroupMatches(tournament);
+        var latest = tournament.Matches
+            .Where(m => m.Segment == BracketSegment.RoundRobin)
+            .OrderByDescending(m => m.CompletionSequence)
+            .First();
+        tournament.CanUndo(latest.Id).Should().BeTrue();
+
+        tournament.StartPlayoffs();
+
+        tournament.CanUndo(latest.Id).Should().BeFalse();
+        tournament.Invoking(t => t.UndoMatch(latest.Id))
+            .Should().Throw<DomainException>().WithMessage("*later stage has already been drawn*");
+    }
+
     [Fact]
     public void Undoing_a_playoff_match_clears_the_advanced_slot()
     {

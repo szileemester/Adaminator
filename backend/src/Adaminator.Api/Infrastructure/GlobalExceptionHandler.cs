@@ -56,12 +56,23 @@ public class GlobalExceptionHandler : IExceptionHandler
                 };
                 break;
 
-            case DbUpdateConcurrencyException:
+            // The row version catches most overlapping writes, but not all: two requests completing the
+            // *same* match each insert game 1 for it, and the unique index rejects the second before the
+            // version check is reached. That is the same collision arriving by a different route, so it
+            // gets the same answer rather than a 500 - logged, because a constraint this catches could
+            // also be a genuine bug rather than a race.
+            case DbUpdateException dbUpdateException:
+                if (dbUpdateException is not DbUpdateConcurrencyException)
+                {
+                    _logger.LogWarning(dbUpdateException, "Database rejected a write; reporting it as a conflict");
+                }
+
                 problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status409Conflict,
                     Title = "Conflicting update",
-                    Detail = "This tournament was changed by another request at the same time. Reload and try again."
+                    // Deliberately not "this tournament" - the Unmatched scoreboard reaches this too.
+                    Detail = "Someone else changed this at the same time. Reload and try again."
                 };
                 break;
 

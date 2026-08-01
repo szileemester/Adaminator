@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -139,19 +138,7 @@ public class TournamentApiTests : IClassFixture<ApiFactory>
         created!.DefaultScoreType.Should().Be("Games");
     }
 
-    private async Task<HttpClient> CreateAuthenticatedClientAsync()
-    {
-        var client = _factory.CreateClient();
-        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = ApiFactory.AdminPassword });
-        login.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var token = await login.Content.ReadFromJsonAsync<LoginResponseBody>(JsonOptions);
-        token.Should().NotBeNull();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token!.Token);
-        return client;
-    }
+    private Task<HttpClient> CreateAuthenticatedClientAsync() => _factory.CreateAuthenticatedClientAsync();
 
     private record TournamentResponse(Guid Id, string Status, bool ThirdPlaceEnabled, string DefaultScoreType, string PublicToken);
-
-    private record LoginResponseBody(string Token, DateTimeOffset ExpiresAt);
 }

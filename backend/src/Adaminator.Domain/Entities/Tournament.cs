@@ -489,8 +489,37 @@ public class Tournament
     // ---- Match results ----
 
     /// <summary>Saves a (possibly partial) detailed score. Never decides the match (FR-MATCH-006/007).</summary>
-    public void SaveMatchResult(Guid matchId, MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries) =>
-        FindMatch(matchId).SaveResult(matchFormat, scoreType, entries);
+    public void SaveMatchResult(Guid matchId, MatchFormat matchFormat, ScoreType scoreType, IReadOnlyList<ScoreEntryInput> entries)
+    {
+        var match = FindMatch(matchId);
+        EnsureFormatFitsSegment(match, matchFormat);
+        match.SaveResult(matchFormat, scoreType, entries);
+    }
+
+    /// <summary>
+    /// A result may override the format for its own match, but not into one the tournament's settings
+    /// could never have chosen for that match. Only the group stage of a round-robin-grouped Group Stage
+    /// + Playoff may allow draws (the same rule <see cref="SetDetails"/> applies to the settings), so
+    /// without this the override is a way round it: a Best-of-2 bracket match completes with no winner
+    /// and nobody to advance, and a Best-of-2 tie-breaker can end level and break no tie at all.
+    /// </summary>
+    private void EnsureFormatFitsSegment(Match match, MatchFormat matchFormat)
+    {
+        if (!matchFormat.AllowsDraw())
+        {
+            return;
+        }
+
+        if (match.Segment != BracketSegment.RoundRobin || Type != TournamentType.GroupStagePlayoff)
+        {
+            throw new DomainException("Only the Group Stage format may allow draws (Best of 2).");
+        }
+
+        if (UsesSwissGroupStage)
+        {
+            throw new DomainException("A Swiss group stage cannot use Best of 2 - choose a decisive format.");
+        }
+    }
 
     /// <summary>Saves the deciding detailed score, sets the winner and advances it (BR-018 through BR-021).</summary>
     public void CompleteMatch(
@@ -501,6 +530,7 @@ public class Tournament
         DateTimeOffset completedAt)
     {
         var match = FindMatch(matchId);
+        EnsureFormatFitsSegment(match, matchFormat);
         match.Complete(matchFormat, scoreType, entries, NextCompletionSequence(), completedAt);
         Advance(match);
     }
@@ -940,8 +970,37 @@ public class Tournament
         Type == TournamentType.DoubleElimination
         || (Type == TournamentType.GroupStagePlayoff && PlayoffKind == PlayoffKind.DoubleElimination);
 
-    /// <summary>A flat, unrouted match with no dependents - a Round Robin/group-stage match or a tie-breaker match. It never advances anyone and its undo needs only the latest-decided check.</summary>
+    /// <summary>A flat, unrouted match with no dependents - a Round Robin/group-stage match or a tie-breaker match. It never advances anyone, so its undo turns on <see cref="HasStageDerivedFrom"/> rather than on route slots.</summary>
     private static bool IsFlatSegment(BracketSegment segment) => segment is BracketSegment.RoundRobin or BracketSegment.Tiebreaker;
+
+    /// <summary>
+    /// Whether a whole stage has already been drawn from a flat match's result. Flat matches route to
+    /// nobody, so nothing points back at them - but the playoff seeding, the next Swiss pairing and each
+    /// tie-breaker wave are all computed from the standings they feed. Undoing one after that would leave
+    /// the derived stage standing on a result that no longer exists: a bracket seeded with a participant
+    /// who no longer qualifies, or a tie-breaker between participants who are no longer tied. Since none
+    /// of those stages can be regenerated (they all refuse to run twice), the undo is refused instead.
+    /// </summary>
+    private bool HasStageDerivedFrom(Match match)
+    {
+        if (PlayoffStarted)
+        {
+            return true;
+        }
+
+        if (match.Segment == BracketSegment.Tiebreaker)
+        {
+            // Seeding is the only thing drawn from a tie-breaker, so the playoff check above is the whole
+            // rule. A *later* tie-breaker wave is also derived from this result, but a wave spans as many
+            // rounds as its cohort needs, so a higher round in the same group is just as likely to be
+            // this match's own wave - the two are indistinguishable without storing which wave a match
+            // belongs to, and a cyclic tie-breaker that then gets undone is not worth a column.
+            return false;
+        }
+
+        // Any tie-breaker at all was drawn from the completed group standings this match belongs to.
+        return TiebreakerMatches.Any() || (UsesSwissGroupStage && match.Round < SwissRoundsPaired);
+    }
 
     /// <summary>
     /// Double Elimination only: the Loser Bracket Final's decided loser - there is no separate
@@ -993,8 +1052,8 @@ public class Tournament
 
         if (IsFlatSegment(match.Segment))
         {
-            // Round Robin / group-stage / tie-breaker matches have no dependents; the latest-decided check suffices.
-            return true;
+            // No match points at a flat one, but a later stage may have been derived from its result.
+            return !HasStageDerivedFrom(match);
         }
 
         if (UsesStoredRoutes)
@@ -1030,8 +1089,16 @@ public class Tournament
         }
 
         // Round Robin / group-stage / tie-breaker matches feed nothing, so there is no dependent slot
-        // to clear - and a drawn Best-of-2 group match has no winner/loser to read anyway.
-        if (!IsFlatSegment(match.Segment))
+        // to clear - and a drawn Best-of-2 group match has no winner/loser to read anyway. They can
+        // still have had a whole stage drawn from their standings, which is checked separately.
+        if (IsFlatSegment(match.Segment))
+        {
+            if (HasStageDerivedFrom(match))
+            {
+                throw new DomainException("This match cannot be undone because a later stage has already been drawn from its result.");
+            }
+        }
+        else
         {
             var (winnerId, loserId) = WinnerAndLoser(match);
 

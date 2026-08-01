@@ -147,15 +147,19 @@ public static class RoundRobinStandings
 
         foreach (var match in roundRobin)
         {
-            // A Swiss bye is a played win with no games: the participant sat the round out, so there is
-            // no score to split. Best-of-2 (the only format ranked by games won) is rejected for a Swiss
-            // group stage, so a game-less win never distorts the primary ranking.
+            // A Swiss bye is a played win with no games actually contested, so it is credited the clean
+            // sweep the format's winner would have taken. Recording no games at all would leave it worth
+            // 0 to the game-differential criterion while every real win is worth a positive margin -
+            // ranking whoever sat out below an identical record that played, on the strength of a round
+            // they were awarded. Best-of-2 (the only format ranked *primarily* by games won) is rejected
+            // for a Swiss group stage, so this credit only ever feeds the differential tie-break.
             if (match.IsBye)
             {
                 if (match.ParticipantAId is { } solo && played.ContainsKey(solo))
                 {
                     played[solo]++;
                     wins[solo]++;
+                    gamesWon[solo] += match.MatchFormat.RequiredWins();
                 }
 
                 continue;

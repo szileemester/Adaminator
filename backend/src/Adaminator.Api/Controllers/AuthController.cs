@@ -1,4 +1,5 @@
 using Adaminator.Api.Auth;
+using Adaminator.Api.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -26,7 +27,7 @@ public class AuthController : ControllerBase
 
     /// <summary>Exchanges the admin password for a bearer token.</summary>
     [HttpPost("login")]
-    [EnableRateLimiting("login")]
+    [EnableRateLimiting(RateLimitPolicies.Login)]
     public ActionResult<LoginResponse> Login([FromBody] LoginRequest request)
     {
         if (string.IsNullOrEmpty(_adminOptions.Password))
