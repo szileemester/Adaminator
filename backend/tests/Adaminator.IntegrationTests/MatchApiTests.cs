@@ -402,7 +402,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             swissRounds = 2
         });
         create.StatusCode.Should().Be(HttpStatusCode.Created);
-        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+        var tournamentId = (await create.Content.ReadFromJsonAsync<ApiFactory.CreatedTournament>(JsonOptions))!.Id;
 
         var participantIds = new List<Guid>();
         foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H" })
@@ -484,7 +484,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             groupCount = 2
         });
         create.StatusCode.Should().Be(HttpStatusCode.Created);
-        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+        var tournamentId = (await create.Content.ReadFromJsonAsync<ApiFactory.CreatedTournament>(JsonOptions))!.Id;
 
         foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H" })
         {
@@ -542,7 +542,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             tiebreakerPolicy = "ComputedThenMatch"
         });
         create.StatusCode.Should().Be(HttpStatusCode.Created);
-        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+        var tournamentId = (await create.Content.ReadFromJsonAsync<ApiFactory.CreatedTournament>(JsonOptions))!.Id;
 
         foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H" })
         {
@@ -599,7 +599,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             groupStageMatchFormat = "Bo2"
         });
         create.StatusCode.Should().Be(HttpStatusCode.Created);
-        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+        var tournamentId = (await create.Content.ReadFromJsonAsync<ApiFactory.CreatedTournament>(JsonOptions))!.Id;
 
         foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H" })
         {
@@ -664,7 +664,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             defaultScoreType = "Games",
             groupCount = 2
         });
-        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+        var tournamentId = (await create.Content.ReadFromJsonAsync<ApiFactory.CreatedTournament>(JsonOptions))!.Id;
 
         foreach (var name in new[] { "A", "B", "C" }) // fewer than the smallest playoff capacity
         {
@@ -690,7 +690,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
             defaultScoreType = "Games",
             groupCount = 2
         });
-        var tournamentId = (await create.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+        var tournamentId = (await create.Content.ReadFromJsonAsync<ApiFactory.CreatedTournament>(JsonOptions))!.Id;
 
         foreach (var name in new[] { "A", "B", "C", "D", "E", "F", "G", "H", "I" }) // 9 -> groups of 5 and 4
         {
@@ -720,17 +720,7 @@ public class MatchApiTests : IClassFixture<ApiFactory>
     private async Task<Guid> CreateStartedTournamentAsync(
         HttpClient client, IReadOnlyList<string> participantNames, string type = "SingleElimination", bool thirdPlaceEnabled = false)
     {
-        var response = await client.PostAsJsonAsync("/api/tournaments", new
-        {
-            name = $"Cup {Guid.NewGuid():N}",
-            date = "2026-07-14",
-            type,
-            defaultMatchFormat = "Bo3",
-            thirdPlaceEnabled
-        });
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var created = await response.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions);
-        var tournamentId = created!.Id;
+        var tournamentId = await ApiFactory.CreateTournamentAsync(client, type, thirdPlaceEnabled);
 
         foreach (var name in participantNames)
         {

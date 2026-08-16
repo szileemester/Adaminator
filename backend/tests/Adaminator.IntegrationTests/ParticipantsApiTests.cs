@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using Adaminator.Infrastructure.Persistence;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Adaminator.IntegrationTests;
 
@@ -77,21 +80,34 @@ public class ParticipantsApiTests : IClassFixture<ApiFactory>
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
-    private static async Task<Guid> CreateTournamentAsync(HttpClient client)
+    /// <summary>
+    /// The database backstop behind the domain's uniqueness rule. Deferrability is the whole point - a
+    /// plain unique constraint would be checked per row and fail the swap above - so it is asserted
+    /// directly rather than left implicit in a test that would only fail for mysterious reasons.
+    /// </summary>
+    [Fact]
+    public async Task Participant_names_are_backed_by_a_deferred_case_insensitive_constraint()
     {
-        var response = await client.PostAsJsonAsync("/api/tournaments", new
-        {
-            name = "Roster Cup",
-            date = "2026-08-01",
-            type = "SingleElimination",
-            defaultMatchFormat = "Bo3",
-            thirdPlaceEnabled = false
-        });
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AdaminatorDbContext>();
+        var connection = dbContext.Database.GetDbConnection();
+        await connection.OpenAsync();
 
-        var created = await response.Content.ReadFromJsonAsync<TournamentResponse>(ApiFactory.JsonOptions);
-        return created!.Id;
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT condeferrable, condeferred
+            FROM pg_constraint
+            WHERE conname = 'UQ_participants_TournamentId_NameLower'
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+
+        (await reader.ReadAsync()).Should().BeTrue("the constraint should exist");
+        reader.GetBoolean(0).Should().BeTrue("it must be DEFERRABLE, or a rename cycle cannot commit");
+        reader.GetBoolean(1).Should().BeTrue("it must be INITIALLY DEFERRED, or EF would hit it mid-save");
     }
+
+    private static Task<Guid> CreateTournamentAsync(HttpClient client) =>
+        ApiFactory.CreateTournamentAsync(client);
 
     private static async Task<List<ParticipantResponse>> ReplaceRosterAsync(
         HttpClient client, Guid tournamentId, params (string Name, Guid? Id)[] roster)

@@ -129,21 +129,10 @@ public class ConcurrencyTests : IClassFixture<ApiFactory>
         return tournamentId;
     }
 
-    private static async Task<Guid> CreateAsync(HttpClient client, string type, int groupCount)
-    {
-        var response = await client.PostAsJsonAsync("/api/tournaments", new
-        {
-            name = $"Race {Guid.NewGuid():N}",
-            date = "2026-08-01",
-            type,
-            defaultMatchFormat = "Bo1",
-            groupStageMatchFormat = "Bo1",
-            thirdPlaceEnabled = false,
-            groupCount
-        });
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        return (await response.Content.ReadFromJsonAsync<TournamentResponse>(ApiFactory.JsonOptions))!.Id;
-    }
+    // Bo1 throughout so a result needs a single game, which keeps the racing requests small.
+    private static Task<Guid> CreateAsync(HttpClient client, string type, int groupCount) =>
+        ApiFactory.CreateTournamentAsync(
+            client, type: type, defaultMatchFormat: "Bo1", groupStageMatchFormat: "Bo1", groupCount: groupCount);
 
     private static async Task AddParticipantsAsync(HttpClient client, Guid tournamentId, int count)
     {

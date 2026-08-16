@@ -1228,16 +1228,33 @@ public class Tournament
             ? PlayoffCapacity
             : SingleEliminationBracket.ComputeBracketSize(_participants.Count));
 
-    private bool IsLatestDecided(Match match)
+    private bool IsLatestDecided(Match match) =>
+        match.CompletionSequence is not null && LatestDecidedMatch() == match;
+
+    /// <summary>The most recently decided match, or null if none has been. Completion sequences are unique, so there is never a tie.</summary>
+    private Match? LatestDecidedMatch()
     {
-        if (match.CompletionSequence is null)
+        Match? latest = null;
+        foreach (var match in _matches)
         {
-            return false;
+            if (match.CompletionSequence is { } sequence && sequence > (latest?.CompletionSequence ?? long.MinValue))
+            {
+                latest = match;
+            }
         }
 
-        var latestSequence = _matches.Where(m => m.CompletionSequence.HasValue).Max(m => m.CompletionSequence);
-        return match.CompletionSequence == latestSequence;
+        return latest;
     }
+
+    /// <summary>
+    /// The one match that can be undone right now, or null if none can. Undo always targets the most
+    /// recently decided match, so however many matches a tournament has there is never more than one
+    /// candidate. Callers that need this for a whole bracket should ask once and compare ids rather than
+    /// asking <see cref="CanUndo"/> per match, which re-scans every match to find the latest one each
+    /// time - quadratic over a 496-match round robin, for an answer that can only be yes once.
+    /// </summary>
+    public Guid? UndoableMatchId =>
+        LatestDecidedMatch() is { } latest && CanUndo(latest.Id) ? latest.Id : null;
 
     /// <summary>The downstream winner-slot and third-place matches, if any, that <paramref name="match"/> feeds into.</summary>
     private (Match? NextWinnerMatch, bool NextWinnerSlotA, Match? ThirdPlaceMatch) FindUndoDependents(Match match)

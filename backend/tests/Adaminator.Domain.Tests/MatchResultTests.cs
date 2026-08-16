@@ -163,6 +163,28 @@ public class MatchResultTests
             .Should().Throw<DomainException>().WithMessage("*already been decided*");
     }
 
+    /// <summary>
+    /// Undo always targets the most recently decided match, so however many matches exist there is never
+    /// more than one candidate. The bracket projection leans on this to ask once per bracket instead of
+    /// once per match - asking per match is quadratic, for an answer only one of them can get.
+    /// </summary>
+    [Fact]
+    public void Exactly_one_match_is_undoable_and_UndoableMatchId_names_it()
+    {
+        var tournament = StartedFourPlayer();
+        tournament.UndoableMatchId.Should().BeNull("nothing has been decided yet");
+
+        var semi0 = Semifinal(tournament, 0);
+        var semi1 = Semifinal(tournament, 1);
+        Complete(tournament, semi0, semi0.ParticipantAId!.Value, Now);
+        Complete(tournament, semi1, semi1.ParticipantAId!.Value, Now.AddMinutes(1));
+
+        var undoable = tournament.Matches.Where(m => tournament.CanUndo(m.Id)).Select(m => m.Id).ToList();
+
+        undoable.Should().Equal(semi1.Id);
+        tournament.UndoableMatchId.Should().Be(semi1.Id);
+    }
+
     [Fact]
     public void Format_override_applies_only_to_the_overridden_match()
     {

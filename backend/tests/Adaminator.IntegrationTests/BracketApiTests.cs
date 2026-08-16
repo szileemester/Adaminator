@@ -166,7 +166,7 @@ public class BracketApiTests : IClassFixture<ApiFactory>
             defaultMatchFormat = "Bo3",
             thirdPlaceEnabled = false
         });
-        var created = await createResponse.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions);
+        var created = await createResponse.Content.ReadFromJsonAsync<ApiFactory.CreatedTournament>(JsonOptions);
 
         foreach (var name in new[] { "A", "B", "C", "D" })
         {
@@ -184,24 +184,10 @@ public class BracketApiTests : IClassFixture<ApiFactory>
         publicView.Bracket!.WinnerRounds.SelectMany(r => r.Matches).Should().HaveCount(3);
     }
 
-    private async Task<Guid> CreateTournamentAsync(HttpClient client, bool thirdPlace)
-    {
-        var response = await client.PostAsJsonAsync("/api/tournaments", new
-        {
-            name = $"Cup {Guid.NewGuid():N}",
-            date = "2026-07-14",
-            type = "SingleElimination",
-            defaultMatchFormat = "Bo3",
-            thirdPlaceEnabled = thirdPlace
-        });
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var created = await response.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions);
-        return created!.Id;
-    }
+    private static Task<Guid> CreateTournamentAsync(HttpClient client, bool thirdPlace) =>
+        ApiFactory.CreateTournamentAsync(client, thirdPlaceEnabled: thirdPlace);
 
     private Task<HttpClient> CreateAuthenticatedClientAsync() => _factory.CreateAuthenticatedClientAsync();
-
-    private record CreatedTournament(Guid Id, string PublicToken);
     private record ParticipantResponse(Guid Id, string Name, int Seed, bool HasBye, string? Emoji = null);
     private record BracketResponse(List<RoundResponse> WinnerRounds);
     private record RoundResponse(int Round, string Title, List<object> Matches);

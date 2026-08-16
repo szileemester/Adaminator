@@ -1,7 +1,9 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Testcontainers.PostgreSql;
@@ -35,6 +37,39 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     }
 
     private record LoginResponse(string Token);
+
+    /// <summary>
+    /// Creates a tournament and returns its id. The defaults are the shape most tests want - a Single
+    /// Elimination cup under a name no other test can collide with - and every field the suite actually
+    /// varies is a parameter. The create contract is the one that keeps growing, so it is spelled out
+    /// here once instead of in an anonymous object per test class, where a newly required field means
+    /// four edits and a 400 in whichever one is missed.
+    /// </summary>
+    public static async Task<Guid> CreateTournamentAsync(
+        HttpClient client,
+        string type = "SingleElimination",
+        bool thirdPlaceEnabled = false,
+        string defaultMatchFormat = "Bo3",
+        string? groupStageMatchFormat = null,
+        int groupCount = 0)
+    {
+        var response = await client.PostAsJsonAsync("/api/tournaments", new
+        {
+            name = $"Cup {Guid.NewGuid():N}",
+            date = "2026-07-14",
+            type,
+            defaultMatchFormat,
+            groupStageMatchFormat,
+            thirdPlaceEnabled,
+            groupCount
+        });
+
+        // Fail here rather than leaving the caller to explain an empty Guid.
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        return (await response.Content.ReadFromJsonAsync<CreatedTournament>(JsonOptions))!.Id;
+    }
+
+    public record CreatedTournament(Guid Id, string PublicToken);
 
     // The image goes to the constructor rather than WithImage: Testcontainers 4.14 deprecated the
     // parameterless form, and it was already pinned here so the tests never float onto a new Postgres.

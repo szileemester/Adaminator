@@ -30,14 +30,13 @@ public class ParticipantConfiguration : IEntityTypeConfiguration<Participant>
         // Group Stage + Playoff only; null for every other type.
         builder.Property(p => p.GroupIndex);
 
-        // Names are unique within a tournament (BR-024), but the rule is the domain's, not a unique
-        // index's. The roster is saved whole and keeps each participant's id across a rename, so one
-        // save can rename several people at once - and swapping two names is then a cycle of UPDATEs
-        // that no ordering satisfies while the index holds. EF cannot break the cycle and throws
-        // rather than saving, failing an edit that is perfectly legal: the roster is unique before it
-        // and unique after it. ReplaceRoster validates the whole list up front and case-insensitively,
-        // which is stricter than the index ever was; concurrent writes are caught by the tournament's
-        // row version. The index stays for lookups, without the constraint.
+        // Plain index, for lookups only. Names are unique within a tournament (BR-024), but that is
+        // enforced by the domain (ReplaceRoster validates the whole list up front, case-insensitively)
+        // and, at the database level, by a deferrable constraint added in EnforceParticipantNameUniqueness.
+        // The constraint is intentionally invisible to EF: declaring a unique index here instead would
+        // make EF order the UPDATEs of a roster save itself, and a save that swaps two names is a cycle
+        // it cannot order, so it throws rather than saving an edit that is perfectly legal - unique
+        // before, unique after. Deferring the check to COMMIT is what lets the swap through.
         builder.HasIndex(p => new { p.TournamentId, p.Name });
     }
 }

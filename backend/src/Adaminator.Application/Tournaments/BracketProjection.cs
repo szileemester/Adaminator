@@ -49,14 +49,15 @@ internal static class BracketProjection
             ? winnerMatches.Max(m => m.Round)
             : SingleEliminationBracket.RoundCount(plannedCapacity);
         var thirdPlace = tournament.Matches.FirstOrDefault(m => m.Segment == BracketSegment.ThirdPlace);
+        var undoableMatchId = tournament.UndoableMatchId;
 
         return new BracketDto(
             tournament.Type,
             tournament.Status,
-            WinnerRounds: GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), roster, tournament),
+            WinnerRounds: GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalRounds), roster, undoableMatchId),
             LoserRounds: Array.Empty<BracketRoundDto>(),
             GrandFinal: null,
-            ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, roster, tournament),
+            ThirdPlace: thirdPlace is null ? null : ToMatchDto(thirdPlace, roster, undoableMatchId),
             ThirdPlacePodium: null,
             Standings: Array.Empty<StandingRowDto>(),
             Placements: BuildSingleEliminationPlacements(winnerMatches, totalRounds, thirdPlace, roster),
@@ -165,7 +166,8 @@ internal static class BracketProjection
     private static BracketDto BuildRoundRobin(Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster)
     {
         var matches = SegmentMatches(tournament, BracketSegment.RoundRobin);
-        var rounds = GroupIntoRounds(matches, PlainRoundTitle, roster, tournament);
+        var undoableMatchId = tournament.UndoableMatchId;
+        var rounds = GroupIntoRounds(matches, PlainRoundTitle, roster, undoableMatchId);
         // Standings must see the tie-breaker results too, so they reflect the played order, not the pre-tie-break one.
         var standingMatches = tournament.Matches.Where(m => m.Segment is BracketSegment.RoundRobin or BracketSegment.Tiebreaker).ToList();
 
@@ -202,6 +204,7 @@ internal static class BracketProjection
         var participantsByGroup = tournament.Participants.ToLookup(p => p.GroupIndex);
         var capacity = tournament.PlayoffCapacity;
         var playoffKind = tournament.PlayoffKind;
+        var undoableMatchId = tournament.UndoableMatchId;
 
         // A Swiss group stage is one pool: no groups, and its schedule/standings hang off GroupStage.
         var swiss = tournament.UsesSwissGroupStage;
@@ -221,10 +224,10 @@ internal static class BracketProjection
 
                 groups.Add(new GroupDto(
                     g,
-                    GroupIntoRounds(groupMatches, PlainRoundTitle, roster, tournament),
+                    GroupIntoRounds(groupMatches, PlainRoundTitle, roster, undoableMatchId),
                     // Standings rank over the group's round-robin AND tie-breaker matches, so they show the played order.
                     WithPlacementOutcomes(standings, index => levels[index].Outcome),
-                    GroupIntoRounds(groupTiebreakers, PlainRoundTitle, roster, tournament)));
+                    GroupIntoRounds(groupTiebreakers, PlainRoundTitle, roster, undoableMatchId)));
             }
         }
 
@@ -248,7 +251,7 @@ internal static class BracketProjection
             GroupStage = new GroupStageDto(
                 tournament.GroupStageKind,
                 playoffKind,
-                swiss ? GroupIntoRounds(poolMatches, PlainRoundTitle, roster, tournament) : Array.Empty<BracketRoundDto>(),
+                swiss ? GroupIntoRounds(poolMatches, PlainRoundTitle, roster, undoableMatchId) : Array.Empty<BracketRoundDto>(),
                 poolStandings,
                 RoundsPlayed: poolMatches.Count == 0 ? 0 : poolMatches.Max(m => m.Round),
                 RoundsTotal: swiss ? tournament.ResolvedSwissRounds : 0,
@@ -256,7 +259,7 @@ internal static class BracketProjection
             // Cross-group deciders (played between groups when a placement level is contested) belong to
             // no single group, so they surface at the top level alongside the per-group ones.
             TiebreakerRounds = GroupIntoRounds(
-                tiebreakersByGroup[null].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList(), PlainRoundTitle, roster, tournament),
+                tiebreakersByGroup[null].OrderBy(m => m.Round).ThenBy(m => m.IndexInRound).ToList(), PlainRoundTitle, roster, undoableMatchId),
             Placements = WithGroupStageEliminations(playoff.Placements, tournament, roster),
             NeedsTiebreakers = tournament.NeedsTiebreakers,
             CanStartPlayoffs = tournament.CanStartPlayoffs,
@@ -316,7 +319,7 @@ internal static class BracketProjection
 
     /// <summary>The played tie-breaker matches for a whole field (Round Robin). Empty when none exist.</summary>
     private static IReadOnlyList<BracketRoundDto> TiebreakerRounds(Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster) =>
-        GroupIntoRounds(SegmentMatches(tournament, BracketSegment.Tiebreaker), PlainRoundTitle, roster, tournament);
+        GroupIntoRounds(SegmentMatches(tournament, BracketSegment.Tiebreaker), PlainRoundTitle, roster, tournament.UndoableMatchId);
 
     /// <summary>
     /// Double Elimination has no separate Third Place match - <see cref="BracketDto.ThirdPlacePodium"/>
@@ -328,10 +331,11 @@ internal static class BracketProjection
     {
         var winnerMatches = SegmentMatches(tournament, BracketSegment.Winner);
         var totalWinnerRounds = winnerMatches.Count == 0 ? 0 : winnerMatches.Max(m => m.Round);
-        var winnerRounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalWinnerRounds), roster, tournament);
+        var undoableMatchId = tournament.UndoableMatchId;
+        var winnerRounds = GroupIntoRounds(winnerMatches, g => RoundTitle(g, totalWinnerRounds), roster, undoableMatchId);
 
         var loserMatches = SegmentMatches(tournament, BracketSegment.Loser);
-        var loserRounds = GroupIntoRounds(loserMatches, PlainRoundTitle, roster, tournament);
+        var loserRounds = GroupIntoRounds(loserMatches, PlainRoundTitle, roster, undoableMatchId);
 
         var grandFinal = tournament.Matches.SingleOrDefault(m => m.Segment == BracketSegment.GrandFinal);
         var thirdPlacePodium = ToSlot(tournament.ThirdPlaceParticipantId, roster);
@@ -347,7 +351,7 @@ internal static class BracketProjection
             tournament.Status,
             winnerRounds,
             loserRounds,
-            grandFinal is null ? null : ToMatchDto(grandFinal, roster, tournament),
+            grandFinal is null ? null : ToMatchDto(grandFinal, roster, undoableMatchId),
             ThirdPlace: null,
             thirdPlacePodium,
             Standings: Array.Empty<StandingRowDto>(),
@@ -425,17 +429,21 @@ internal static class BracketProjection
             .ToList();
 
     private static IReadOnlyList<BracketRoundDto> GroupIntoRounds(
-        List<Match> matches, Func<int, string> title, IReadOnlyDictionary<Guid, Participant> roster, Tournament tournament) =>
+        List<Match> matches, Func<int, string> title, IReadOnlyDictionary<Guid, Participant> roster, Guid? undoableMatchId) =>
         matches
             .GroupBy(m => m.Round)
             .OrderBy(g => g.Key)
             .Select(g => new BracketRoundDto(
                 g.Key,
                 title(g.Key),
-                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, roster, tournament)).ToList()))
+                g.OrderBy(m => m.IndexInRound).Select(m => ToMatchDto(m, roster, undoableMatchId)).ToList()))
             .ToList();
 
-    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, Participant> roster, Tournament tournament)
+    /// <param name="undoableMatchId">
+    /// The tournament's single undoable match, read once by the caller. Asking the tournament per match
+    /// instead would re-scan every match each time, for an answer only one of them can get.
+    /// </param>
+    private static BracketMatchDto ToMatchDto(Match match, IReadOnlyDictionary<Guid, Participant> roster, Guid? undoableMatchId)
     {
         var entries = match.ScoreEntries
             .OrderBy(e => e.SequenceNumber)
@@ -460,7 +468,7 @@ internal static class BracketProjection
             aggregateA,
             aggregateB,
             match.CompletedAt,
-            CanUndo: tournament.CanUndo(match.Id));
+            CanUndo: match.Id == undoableMatchId);
     }
 
     private static BracketSlotDto? ToSlot(Guid? participantId, IReadOnlyDictionary<Guid, Participant> roster)
