@@ -36,9 +36,9 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     private record LoginResponse(string Token);
 
-    private readonly PostgreSqlContainer _database = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
-        .Build();
+    // The image goes to the constructor rather than WithImage: Testcontainers 4.14 deprecated the
+    // parameterless form, and it was already pinned here so the tests never float onto a new Postgres.
+    private readonly PostgreSqlContainer _database = new PostgreSqlBuilder("postgres:16-alpine").Build();
 
     public async Task InitializeAsync() => await _database.StartAsync();
 

@@ -8,7 +8,7 @@ using Adaminator.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -93,11 +93,11 @@ builder.Services.AddHealthChecks()
 // Fly's edge proxy terminates the real client connection, so without this, every request would
 // appear to come from the proxy's own address - defeating per-IP rate limiting below. Fly is the
 // only hop in front of this app and its proxy address isn't a fixed one we can pin, so the
-// X-Forwarded-For header is trusted as-is rather than restricted by KnownProxies/KnownNetworks.
+// X-Forwarded-For header is trusted as-is rather than restricted by KnownProxies/KnownIPNetworks.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    options.KnownNetworks.Clear();
+    options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
 
@@ -143,18 +143,22 @@ builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo { Title = "Adaminator API", Version = "v1" });
 
-    var scheme = new OpenApiSecurityScheme
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
         Type = SecuritySchemeType.Http,
         Scheme = "bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Enter the JWT returned by /api/auth/login.",
-        Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
-    };
-    options.AddSecurityDefinition("Bearer", scheme);
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement { [scheme] = Array.Empty<string>() });
+        Description = "Enter the JWT returned by /api/auth/login."
+    });
+
+    // OpenAPI.NET v2 (Swashbuckle 10) models a requirement as a *reference* to the definition above
+    // rather than a second copy of the scheme object, so the two can no longer drift apart.
+    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference("Bearer", document)] = new List<string>()
+    });
 });
 
 var app = builder.Build();
