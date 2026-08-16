@@ -51,6 +51,36 @@ public class ConcurrencyTests : IClassFixture<ApiFactory>
     }
 
     /// <summary>
+    /// Two requests adding the same participant name. Each checks uniqueness against the roster it read,
+    /// so each passes its own check - the database constraint is the only thing left that could catch it.
+    /// What this pins down is which guard actually fires: the row version, before the constraint is ever
+    /// reached, so the loser gets a 409 rather than a deferred constraint violation at COMMIT (which
+    /// arrives outside the statement that caused it and would be far harder to report usefully).
+    /// </summary>
+    [Fact]
+    public async Task Two_overlapping_roster_writes_cannot_both_add_the_same_name()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var tournamentId = await ApiFactory.CreateTournamentAsync(client);
+
+        using var first = _factory.Services.CreateScope();
+        using var second = _factory.Services.CreateScope();
+        var repositoryA = first.ServiceProvider.GetRequiredService<ITournamentRepository>();
+        var repositoryB = second.ServiceProvider.GetRequiredService<ITournamentRepository>();
+
+        var tournamentA = (await repositoryA.GetByIdAsync(tournamentId))!;
+        var tournamentB = (await repositoryB.GetByIdAsync(tournamentId))!;
+
+        tournamentA.AddParticipant("Alice");
+        tournamentB.AddParticipant("Alice");
+
+        await repositoryA.SaveChangesAsync();
+
+        await repositoryB.Invoking(r => r.SaveChangesAsync())
+            .Should().ThrowAsync<DbUpdateConcurrencyException>();
+    }
+
+    /// <summary>
     /// The costly one: two "start playoffs" requests both see a group stage that has not been played off
     /// yet, and both build a whole bracket. Left unguarded that leaves two Grand Finals in one
     /// tournament, which every later bracket read then fails on - with no way back but deleting it.

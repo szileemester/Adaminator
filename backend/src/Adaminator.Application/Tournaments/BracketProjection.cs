@@ -182,7 +182,7 @@ internal static class BracketProjection
             Standings: BuildStandings(standingMatches, tournament.Participants, roster),
             Placements: Array.Empty<PlacementGroupDto>(),
             Groups: Array.Empty<GroupDto>(),
-            TiebreakerRounds: TiebreakerRounds(tournament, roster),
+            TiebreakerRounds: TiebreakerRounds(tournament, roster, undoableMatchId),
             NeedsTiebreakers: tournament.NeedsTiebreakers,
             CanStartPlayoffs: false,
             CanFinish: tournament.CanFinish);
@@ -318,8 +318,9 @@ internal static class BracketProjection
             .ToList();
 
     /// <summary>The played tie-breaker matches for a whole field (Round Robin). Empty when none exist.</summary>
-    private static IReadOnlyList<BracketRoundDto> TiebreakerRounds(Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster) =>
-        GroupIntoRounds(SegmentMatches(tournament, BracketSegment.Tiebreaker), PlainRoundTitle, roster, tournament.UndoableMatchId);
+    private static IReadOnlyList<BracketRoundDto> TiebreakerRounds(
+        Tournament tournament, IReadOnlyDictionary<Guid, Participant> roster, Guid? undoableMatchId) =>
+        GroupIntoRounds(SegmentMatches(tournament, BracketSegment.Tiebreaker), PlainRoundTitle, roster, undoableMatchId);
 
     /// <summary>
     /// Double Elimination has no separate Third Place match - <see cref="BracketDto.ThirdPlacePodium"/>
