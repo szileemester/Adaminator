@@ -203,7 +203,7 @@ export function TournamentForm({
   // and save the rewrite the moment anything else is changed.
   const groupStageMatchFormat = watch('groupStageMatchFormat');
   useEffect(() => {
-    if (usesSwissPool && !decisiveFormat.safeParse(groupStageMatchFormat).success) {
+    if (usesSwissPool && groupStageMatchFormat === 'Bo2') {
       setValue('groupStageMatchFormat', 'Bo3');
     }
   }, [usesSwissPool, groupStageMatchFormat, setValue]);

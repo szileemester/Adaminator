@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using FluentAssertions;
 
 namespace Adaminator.IntegrationTests;
@@ -13,10 +12,8 @@ namespace Adaminator.IntegrationTests;
 /// </summary>
 public class UnmatchedApiTests : IClassFixture<ApiFactory>
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() }
-    };
+    // The API's own serializer settings, so the suite reads responses exactly as the API writes them.
+    private static readonly JsonSerializerOptions JsonOptions = ApiFactory.JsonOptions;
 
     private readonly ApiFactory _factory;
 

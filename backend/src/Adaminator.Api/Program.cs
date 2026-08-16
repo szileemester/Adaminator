@@ -56,8 +56,12 @@ builder.Services.AddInfrastructure(connectionString);
 builder.Services.AddScoped<JwtTokenService>();
 
 builder.Services.AddControllers()
+    // allowIntegerValues: false rejects a numeric enum at the wire, where the concern belongs. The
+    // converter accepts numbers by default, so without it any request could park a value like 42 in an
+    // enum column and every per-DTO IsInEnum() rule would be the only thing standing in the way.
     .AddJsonOptions(options =>
-        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+        options.JsonSerializerOptions.Converters.Add(
+            new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false)));
 
 // ---- AuthN / AuthZ ----
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

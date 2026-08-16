@@ -3,36 +3,23 @@ import axios from 'axios';
 const TOKEN_KEY = 'adaminator.token';
 const EXPIRY_KEY = 'adaminator.token.expiresAt';
 
-/** A stored token counts as gone once it expires - the server would only reject it anyway. */
-function readToken(): string | null {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (!token) {
-    return null;
-  }
-
-  const expiresAt = localStorage.getItem(EXPIRY_KEY);
-  if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
-    clearToken();
-    return null;
-  }
-
-  return token;
-}
-
 function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(EXPIRY_KEY);
 }
 
+/**
+ * Plain storage for the session, with no opinion about whether it is still valid - deciding that is
+ * AuthContext's job, because only it can act on the answer. Reporting an expired token as absent from
+ * here would strip the header off the request that is about to fail, and the 401 handler below would
+ * then see no token and leave the admin sitting on a page that can no longer load anything.
+ */
 export const tokenStore = {
-  get: readToken,
-  set: (token: string, expiresAt?: string) => {
+  get: () => localStorage.getItem(TOKEN_KEY),
+  getExpiresAt: () => localStorage.getItem(EXPIRY_KEY),
+  set: (token: string, expiresAt: string) => {
     localStorage.setItem(TOKEN_KEY, token);
-    if (expiresAt) {
-      localStorage.setItem(EXPIRY_KEY, expiresAt);
-    } else {
-      localStorage.removeItem(EXPIRY_KEY);
-    }
+    localStorage.setItem(EXPIRY_KEY, expiresAt);
   },
   clear: clearToken,
 };

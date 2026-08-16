@@ -4,6 +4,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Adaminator.Api.Infrastructure;
 
@@ -61,10 +62,15 @@ public class GlobalExceptionHandler : IExceptionHandler
             // version check is reached. That is the same collision arriving by a different route, so it
             // gets the same answer rather than a 500 - logged, because a constraint this catches could
             // also be a genuine bug rather than a race.
-            case DbUpdateException dbUpdateException:
+            // Only the two shapes that really mean "someone else got there first": a lost row-version
+            // check, and a duplicate key. Every other DbUpdateException - a null, length, foreign key or
+            // check violation - is a bug, and must keep reporting 500 rather than telling the user to
+            // reload and try again forever.
+            case DbUpdateException dbUpdateException when dbUpdateException is DbUpdateConcurrencyException
+                || dbUpdateException.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation }:
                 if (dbUpdateException is not DbUpdateConcurrencyException)
                 {
-                    _logger.LogWarning(dbUpdateException, "Database rejected a write; reporting it as a conflict");
+                    _logger.LogWarning(dbUpdateException, "Database rejected a write as a duplicate; reporting it as a conflict");
                 }
 
                 problem = new ProblemDetails

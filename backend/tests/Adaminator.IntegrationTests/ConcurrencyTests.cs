@@ -156,16 +156,10 @@ public class ConcurrencyTests : IClassFixture<ApiFactory>
 
     private static async Task StartAsync(HttpClient client, Guid tournamentId, bool drawGroups = false)
     {
-        if (drawGroups)
-        {
-            (await client.PostAsync($"/api/tournaments/{tournamentId}/bracket/draw-groups", null))
-                .StatusCode.Should().Be(HttpStatusCode.OK);
-        }
-        else
-        {
-            (await client.PostAsync($"/api/tournaments/{tournamentId}/bracket/generate", null))
-                .StatusCode.Should().Be(HttpStatusCode.OK);
-        }
+        // A group stage is drawn, every other shape is generated; both then start the same way.
+        var build = drawGroups ? "draw-groups" : "generate";
+        (await client.PostAsync($"/api/tournaments/{tournamentId}/bracket/{build}", null))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
 
         (await client.PostAsync($"/api/tournaments/{tournamentId}/start", null))
             .StatusCode.Should().Be(HttpStatusCode.OK);

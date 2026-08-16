@@ -18,8 +18,13 @@ export function PublicTournamentPage() {
     // This is the one screen whose whole point is watching a tournament as it is played. The app
     // disables focus refetching globally, which suits the admin views - they refresh on their own
     // actions - but leaves a spectator staring at whatever the bracket looked like when they opened it.
-    refetchInterval: 15_000,
+    // A finished tournament can never change again, so the polling stops rather than asking the API
+    // the same question every 15 seconds for as long as the tab is left open.
+    refetchInterval: (query) => (query.state.data?.status === 'Finished' ? false : 15_000),
     refetchOnWindowFocus: true,
+    // Without this the focus refetch and the interval both fire on returning to the tab, doubling the
+    // read; the global default is staleTime 0.
+    staleTime: 10_000,
   });
 
   return (

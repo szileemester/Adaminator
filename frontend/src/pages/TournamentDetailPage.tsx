@@ -77,17 +77,22 @@ export function TournamentDetailPage() {
     queryFn: () => getTournament(id),
   });
 
+  /**
+   * Closes the dialog the action was launched from and surfaces why it failed. Without it a failed
+   * action just re-enables the dialog button and says nothing at all.
+   */
+  const reportFailure = (closeDialog: (open: boolean) => void) => (err: unknown) => {
+    closeDialog(false);
+    setActionError(extractErrorMessage(err));
+  };
+
   const deleteMutation = useMutation({
     mutationFn: () => deleteTournament(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['tournaments'] });
       navigate('/');
     },
-    // Without this a failed delete just re-enables the dialog button and says nothing at all.
-    onError: (err: unknown) => {
-      setConfirmOpen(false);
-      setActionError(extractErrorMessage(err));
-    },
+    onError: reportFailure(setConfirmOpen),
   });
 
   const isPlanned = tournament?.status === 'Planned';
@@ -124,10 +129,7 @@ export function TournamentDetailPage() {
         queryClient.invalidateQueries({ queryKey: ['bracket', id] }),
       ]);
     },
-    onError: (err: unknown) => {
-      closeDialog(false);
-      setActionError(extractErrorMessage(err));
-    },
+    onError: reportFailure(closeDialog),
   });
 
   const finishMutation = useMutation(bracketAction(() => finishTournament(id), setConfirmFinishOpen, true));

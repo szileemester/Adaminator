@@ -10,12 +10,31 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => tokenStore.get());
+/**
+ * The stored session, or null if it has already run out. Checking the expiry here means an 8-hour-old
+ * session is recognised as over when the app loads, so ProtectedRoute redirects on arrival rather than
+ * letting a whole form be filled in and then thrown away by the 401 handler. A session that expires
+ * while the tab is open is still caught the other way round: the token is sent, the server rejects it,
+ * and the 401 handler clears it and redirects.
+ */
+function readLiveToken(): string | null {
+  const token = tokenStore.get();
+  if (!token) {
+    return null;
+  }
 
-  // Storing the expiry alongside the token means an 8-hour-old session is recognised as over before the
-  // first request is sent, rather than after one fails - so ProtectedRoute redirects on arrival instead
-  // of letting a whole form be filled in and then thrown away by the 401 handler.
+  const expiresAt = tokenStore.getExpiresAt();
+  if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+    tokenStore.clear();
+    return null;
+  }
+
+  return token;
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [token, setToken] = useState<string | null>(readLiveToken);
+
   const login = useCallback(async (password: string) => {
     const result = await loginRequest(password);
     tokenStore.set(result.token, result.expiresAt);
